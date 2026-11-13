@@ -1,0 +1,59 @@
+Room,Description,Value
+Entire Roomplan,Name,Sample House - Proposed
+Entire Roomplan,Address,1 Example Ln Sampletown IL
+Entire Roomplan,Total exterior floor area [ft^2],760.0
+Entire Roomplan,Total livable floor area [ft^2],722.6
+Living Room (1),Floor area [ft^2],430.6
+Kitchen,Floor area [ft^2],234.4
+Hall Bath,Floor area [ft^2],50.3
+Living Room (3),Floor area [ft^2],7.3
+Living Room (1),Dimensions (bounding box) [ft],23'  8" x 18'  5"
+Living Room (1),Dimensions (inscribed) [ft],23'  7" x 18'  4"
+Kitchen,Dimensions (bounding box) [ft],17'  4" x 14'  9"
+Kitchen,Dimensions (inscribed) [ft],17'  4" x 12' 10"
+Hall Bath,Dimensions [ft],8'  5" x 5' 11"
+Living Room (3),Dimensions (bounding box) [ft],15'  9" x 0' 11"
+Living Room (3),Dimensions (inscribed) [ft],0'  0" x 0'  0"
+Entire Roomplan,Wall area [ft^2],1458.3
+Living Room (1),Wall area [ft^2],778.5
+Kitchen,Wall area [ft^2],333.9
+Hall Bath,Wall area [ft^2],237.0
+Living Room (3),Wall area [ft^2],108.9
+Living Room (1),Ceiling height [ft] (approx),9'  9" - 14'  4" 
+Kitchen,Ceiling height [ft],9'  1" 
+Hall Bath,Ceiling height [ft],8'  0" 
+Living Room (3),Ceiling height [ft] (approx),9'  9" 
+Entire Roomplan,Total perimeter in rooms [ft],208'  9"
+Living Room (1),Perimeter [ft],83'  8"
+Kitchen,Perimeter [ft],64'  1"
+Hall Bath,Perimeter [ft],28'  8"
+Living Room (3),Perimeter [ft],32'  4"
+Hall Bath,Doors total casing length [ft],17'  0"
+Kitchen,Windows total casing length [ft],42'  4"
+Living Room (1),Windows total casing length [ft],29'  6"
+Entire Roomplan,Total window area [ft^2],90.6
+Living Room (1),Window dimensions [ft],4'  0" x 10'  3"
+Kitchen,Window dimensions [ft],4'  5" x 5'  9"
+Kitchen,Window dimensions [ft],4'  4" x 5'  7"
+Hall Bath,Door dimensions [ft],2'  8" x 6'  8"
+Entire Roomplan,# Cabinets,4
+Entire Roomplan,# Sinks,2
+Entire Roomplan,# Bar stools,2
+Entire Roomplan,# Dishwashers,1
+Entire Roomplan,# Ovens,1
+Entire Roomplan,# Toilets,1
+Kitchen,Cabinet dimensions (w x h x d) [ft],7'  7" x 3'  8" x 2'  0"
+Kitchen,Cabinet dimensions (w x h x d) [ft],4'  3" x 3'  8" x 2'  1"
+Kitchen,Cabinet dimensions (w x h x d) [ft],2'  8" x 3' 11" x 1'  2"
+Kitchen,Cabinet dimensions (w x h x d) [ft],3' 10" x 9'  2" x 2'  3"
+Kitchen,Bar stool dimensions (w x h x d) [ft],1'  4" x 2'  9" x 1'  3"
+Kitchen,Bar stool dimensions (w x h x d) [ft],1'  4" x 2'  9" x 1'  3"
+Kitchen,Oven dimensions (w x h x d) [ft],2'  7" x 3'  8" x 2'  4"
+Kitchen,Sink dimensions (w x h x d) [ft],1'  4" x 0'  8" x 1'  9"
+Hall Bath,Sink dimensions (w x h x d) [ft],1'  2" x 0'  8" x 1'  6"
+Hall Bath,Toilet dimensions (w x h x d) [ft],1'  6" x 2'  5" x 2'  3"
+Kitchen,Dishwasher dimensions (w x h x d) [ft],2'  0" x 3'  8" x 2'  3"
+Key,Dimensions (bounding box),Smallest rectangle that contains the room
+Key,Dimensions (inscribed),Largest rectangle that fits inside the room
+Settings,Wall thickness [ft] (total wall length: 100'  0"),0'  4"
+Settings,Each room area method,Internal wall area excluded

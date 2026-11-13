@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\App\V1\EstimateAiController;
 use App\Http\Controllers\Api\App\V1\EstimateAiRuleController;
+use App\Http\Controllers\Api\App\V1\EstimateAiRunController;
+use App\Http\Controllers\Api\App\V1\EstimateCombineItemsController;
 use App\Http\Controllers\Api\App\V1\EstimateContractSettingsController;
 use App\Http\Controllers\Api\App\V1\EstimateController;
 use App\Http\Controllers\Api\App\V1\EstimateEmailController;
@@ -57,6 +59,25 @@ Route::get('estimates/{estimate}/sections/{section}/duplicate-targets', [Estimat
 Route::post('estimates/{estimate}/sections/{section}/duplicate-to-estimate', [EstimateSectionController::class, 'duplicateToEstimate'])->whereNumber(['estimate', 'section'])->name('estimates.sections.duplicate-to-estimate');
 Route::post('estimates/{estimate}/sections/{section}/ai-draft', [EstimateAiController::class, 'draft'])->whereNumber(['estimate', 'section'])->name('estimates.sections.ai-draft');
 Route::post('estimates/{estimate}/ai-draft/{draft}/discard', [EstimateAiController::class, 'discard'])->whereNumber(['estimate', 'draft'])->name('estimates.ai-draft.discard');
+
+// Whole-estimate AI drafting: a run is started, followed while a queued job
+// drafts it, then reviewed (EstimateAiRunController). The two routes above
+// are the one-section drafter older app builds still call.
+Route::get('estimates/{estimate}/ai-generator', [EstimateAiRunController::class, 'show'])->whereNumber('estimate')->name('estimates.ai-generator.show');
+Route::get('estimates/{estimate}/ai-requests/{run}', [EstimateAiRunController::class, 'request'])->whereNumber(['estimate', 'run'])->name('estimates.ai-requests.show');
+Route::post('estimates/{estimate}/ai-requests/{run}/remove-draft', [EstimateAiRunController::class, 'removeDraft'])->whereNumber(['estimate', 'run'])->name('estimates.ai-requests.remove-draft');
+Route::post('estimates/{estimate}/ai-runs', [EstimateAiRunController::class, 'store'])->whereNumber('estimate')->name('estimates.ai-runs.store');
+Route::get('estimates/{estimate}/ai-runs/{run}', [EstimateAiRunController::class, 'run'])->whereNumber(['estimate', 'run'])->name('estimates.ai-runs.show');
+Route::post('estimates/{estimate}/ai-runs/{run}/stop', [EstimateAiRunController::class, 'stop'])->whereNumber(['estimate', 'run'])->name('estimates.ai-runs.stop');
+Route::patch('estimates/{estimate}/ai-runs/{run}/lines/{line}', [EstimateAiRunController::class, 'updateLine'])->whereNumber(['estimate', 'run', 'line'])->name('estimates.ai-runs.lines.update');
+Route::delete('estimates/{estimate}/ai-runs/{run}/lines/{line}', [EstimateAiRunController::class, 'destroyLine'])->whereNumber(['estimate', 'run', 'line'])->name('estimates.ai-runs.lines.destroy');
+Route::delete('estimates/{estimate}/ai-runs/{run}/sections/{section}', [EstimateAiRunController::class, 'destroySection'])->whereNumber(['estimate', 'run', 'section'])->name('estimates.ai-runs.sections.destroy');
+Route::post('estimates/{estimate}/ai-runs/{run}/sections/{section}/redo', [EstimateAiRunController::class, 'redoSection'])->whereNumber(['estimate', 'run', 'section'])->name('estimates.ai-runs.sections.redo');
+Route::post('estimates/{estimate}/ai-runs/{run}/discard', [EstimateAiRunController::class, 'discard'])->whereNumber(['estimate', 'run'])->name('estimates.ai-runs.discard');
+Route::post('estimates/{estimate}/ai-runs/{run}/finish', [EstimateAiRunController::class, 'finish'])->whereNumber(['estimate', 'run'])->name('estimates.ai-runs.finish');
+
+Route::get('estimates/{estimate}/combine-items', [EstimateCombineItemsController::class, 'index'])->whereNumber('estimate')->name('estimates.combine-items.index');
+Route::post('estimates/{estimate}/combine-items', [EstimateCombineItemsController::class, 'store'])->whereNumber('estimate')->name('estimates.combine-items.store');
 
 Route::get('estimates/{estimate}/ai-rules', [EstimateAiRuleController::class, 'index'])->whereNumber('estimate')->name('estimates.ai-rules.index');
 Route::post('estimates/{estimate}/ai-rules', [EstimateAiRuleController::class, 'store'])->whereNumber('estimate')->name('estimates.ai-rules.store');

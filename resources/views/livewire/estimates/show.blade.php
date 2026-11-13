@@ -196,10 +196,18 @@
 
                             <flux:accordion.content>
                                 <flux:separator variant="subtle"/>
-                                @if(!empty($section['ai_scope']))
+                                {{-- How the AI read this section, and the note the estimator typed for it (2026-11-13). Never on the client's copy. --}}
+                                @if(!empty($section['ai_scope']) || !empty($section['ai_note']))
                                     <div class="py-3 flex items-start gap-2 text-sm text-zinc-500 dark:text-zinc-400">
                                         <flux:icon.sparkles class="w-4 h-4 mt-0.5 shrink-0 text-indigo-400" />
-                                        <p class="italic leading-5">{{ $section['ai_scope'] }}</p>
+                                        <div class="min-w-0 space-y-1">
+                                            @if(!empty($section['ai_scope']))
+                                                <p class="italic leading-5">{{ $section['ai_scope'] }}</p>
+                                            @endif
+                                            @if(!empty($section['ai_note']))
+                                                <p class="leading-5 text-zinc-600 dark:text-zinc-300" data-section-ai-note><span class="font-medium">Note to Claude:</span> {{ $section['ai_note'] }}</p>
+                                            @endif
+                                        </div>
                                     </div>
                                     <flux:separator variant="subtle"/>
                                 @endif
@@ -389,7 +397,8 @@
             @endforeach
         </div>
 
-        <flux:button.group>
+        {{-- Five actions no longer fit one row beside the details card on a laptop: they wrap. --}}
+        <flux:button.group class="flex-wrap gap-y-2">
             <flux:button
                 wire:click="sectionAdd"
                 variant="primary"
@@ -404,6 +413,14 @@
                 icon="sparkles"
                 >
                 AI Generate
+            </flux:button>
+
+            <flux:button
+                wire:click="$dispatchTo('estimates.estimate-combine-line-items', 'openCombineLineItems')"
+                variant="filled"
+                icon="arrows-pointing-in"
+                >
+                Combine Items
             </flux:button>
 
             <flux:button
@@ -446,6 +463,7 @@
              its draft mid-edit. --}}
         <livewire:line-items.estimate-line-item-create :estimate="$estimate" wire:key="estimate-line-item-create-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-a-i-generator :estimate="$estimate" wire:key="estimate-ai-generator-{{ $estimate->id }}"/>
+        <livewire:estimates.estimate-combine-line-items :estimate="$estimate" wire:key="estimate-combine-line-items-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-sub-document-compare :estimate="$estimate" wire:key="estimate-sub-document-compare-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-supplier-quote :estimate="$estimate" wire:key="estimate-supplier-quote-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-markup :estimate="$estimate" wire:key="estimate-markup-{{ $estimate->id }}"/>

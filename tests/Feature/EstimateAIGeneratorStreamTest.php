@@ -10,23 +10,10 @@ uses(RefreshDatabase::class);
 
 require_once __DIR__.'/../Support/estimate-ai-fixtures.php';
 
-it('puts every drafted line on the estimate as it streams, and shows the same rows afterwards', function () {
+it('puts every drafted line on its section, and shows the same rows for review', function () {
     [$fx, $component] = draftingGenerator();
 
-    $output = capturingLivewireStream(fn () => $component->call('generate'));
-
-    $chunks = collect(explode('}{', $output))->map(fn ($chunk) => json_decode('{'.trim($chunk, '{}').'}', true));
-    $rows = $chunks->where('body.name', 'draft-rows')->pluck('body.content')->values();
-    $totals = $chunks->where('body.name', 'draft-total')->pluck('body.content')->values();
-    $status = $chunks->where('body.name', 'draft-status')->pluck('body.content')->values();
-
-    expect($rows)->toHaveCount(2)
-        ->and($rows[0])->toContain('Demo Bathroom')->toContain('Demolition/Demo')->toContain('$850.00')
-        ->and($rows[1])->toContain('Floor Tile')->toContain('value="40"')->toContain('sq.ft.')->toContain('$954.00')
-        // Each row is appended, never replacing what streamed before it.
-        ->and($chunks->where('body.name', 'draft-rows')->pluck('body.mode')->unique()->all())->toBe(['default'])
-        ->and($totals->all())->toBe(['$850.00', '$1,804.00'])
-        ->and($status->last())->toBe('Drafting from your catalog… 2 line items so far');
+    $component->call('generate')->assertOk();
 
     // The lines are on the section already — no apply step.
     $lines = draftedLines($fx);
@@ -41,7 +28,9 @@ it('puts every drafted line on the estimate as it streams, and shows the same ro
         ->and($fx['section']->fresh()->ai_scope)->toBe('Hall bath.');
 
     $component->assertSet('showPreview', true)
+        ->assertSet('isGenerating', false)
         ->assertSet('generatedItems.0.id', $lines[0]->id)
+        ->assertSet('generatedItems.0.section_id', $fx['section']->id)
         ->assertSet('generatedItems.1.category', 'Tiles')
         ->assertSet('generatedItems.1.total', 954.0)
         ->assertSee('2 line items drafted into Hall Bath')
@@ -52,7 +41,7 @@ it('puts every drafted line on the estimate as it streams, and shows the same ro
 
 it('saves a quantity typed into the table to its line, and treats a blank as one', function () {
     [$fx, $component] = draftingGenerator();
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     $component->set('generatedItems.1.quantity', '52.5')->assertOk();
     $tile = draftedLines($fx)[1];
@@ -60,13 +49,14 @@ it('saves a quantity typed into the table to its line, and treats a blank as one
         ->and((float) $tile->total)->toEqualWithDelta(52.5 * 23.85, 0.01);
     $component->assertSet('generatedItems.1.total', (float) $tile->total);
 
-    $component->set('generatedItems.1.quantity', '')->assertOk();
+    // A blank is saved as one — and the box, and so the totals beside it, show the one that was saved.
+    $component->set('generatedItems.1.quantity', '')->assertOk()->assertSet('generatedItems.1.quantity', 1.0);
     expect((float) $tile->fresh()->quantity)->toBe(1.0);
 });
 
 it('removes a drafted line for good, and a discarded draft leaves the estimate as it was', function () {
     [$fx, $component] = draftingGenerator();
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
     $lines = draftedLines($fx);
 
     $component->call('removeItem', 0)->assertOk();
@@ -82,7 +72,7 @@ it('removes a drafted line for good, and a discarded draft leaves the estimate a
 
 it('re-reads its rows when the edit modal saves or removes a line', function () {
     [$fx, $component] = draftingGenerator();
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
     $lines = draftedLines($fx);
 
     $lines[1]->update(['quantity' => 12, 'total' => 12 * 23.85]);
@@ -96,7 +86,7 @@ it('re-reads its rows when the edit modal saves or removes a line', function () 
 
 it('finishes by closing up, the lines already being on the estimate', function () {
     [$fx, $component] = draftingGenerator();
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     $component->call('finish')->assertOk()->assertSet('generatedItems', [])->assertSet('showPreview', false);
     expect(draftedLines($fx))->toHaveCount(2);
@@ -107,7 +97,7 @@ it('keeps what was drafted when the model is cut off, and says so', function () 
     $fake = app(EstimateAIService::class);
     $fake->reply['stop_reason'] = 'max_tokens';
 
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     expect(draftedLines($fx))->toHaveCount(2);
     $component->assertSet('showPreview', true)->assertSee('The draft stopped early')->assertSee('cut off');

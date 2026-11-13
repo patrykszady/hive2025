@@ -174,17 +174,19 @@ it('briefs the model with the company name, its rules and what estimators change
 
 it('records every run, marks how it ended, and snapshots the corrections when the estimate is signed', function () {
     [$fx, $component] = draftingGenerator();
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     $draft = EstimateAiDraft::sole();
     expect($draft->inquiry)->toBe('Hall bath: new tile floor and shower.')
         ->and($draft->status)->toBe('drafted')
         ->and($draft->user_id)->toBe($fx['user']->id)
         ->and($draft->model)->toBe('claude-opus-5')
-        ->and($draft->usage['output_tokens'])->toBe(300)
+        // What the call used is the run's: one call may draft many sections.
+        ->and($draft->run->usage['output_tokens'])->toBe(300)
+        ->and($draft->run->status)->toBe('finished')
         ->and(collect($draft->drafted_items)->pluck('name')->all())->toBe(['Demo Bathroom', 'Floor Tile'])
         ->and((float) $draft->drafted_items[1]['quantity'])->toBe(40.0);
-    $component->assertSet('draftId', $draft->id);
+    $component->assertSet('runId', $draft->run_id);
 
     // The estimator resizes the tile and removes the demo, then keeps the draft.
     $component->set('generatedItems.1.quantity', '52')->call('removeItem', 0)->call('finish');
@@ -208,7 +210,7 @@ it('records every run, marks how it ended, and snapshots the corrections when th
 
     // A discarded draft is remembered as discarded and never taught from.
     [$fx2, $component2] = draftingGenerator();
-    capturingLivewireStream(fn () => $component2->call('generate'));
+    $component2->call('generate');
     $component2->call('discardDraft');
     expect(EstimateAiDraft::latest('id')->first()->status)->toBe('discarded');
 });

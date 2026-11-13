@@ -129,6 +129,9 @@ class EstimateResource extends JsonResource
             'order' => $section->order,
             'total' => round((float) $section->total, 2),
             'locked' => $locked,
+            // An AI-drafted section: how the AI read it, and the note the estimator typed for it.
+            'ai_scope' => filled($section->ai_scope) ? (string) $section->ai_scope : null,
+            'ai_note' => filled($section->ai_note) ? (string) $section->ai_note : null,
             'line_items' => $section->estimate_line_items
                 ->sortBy('order')
                 ->values()

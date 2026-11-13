@@ -257,6 +257,27 @@ return [
             // Never starve PHP-FPM serving the site on the same 2 cores.
             'nice' => 10,
         ],
+
+        // Whole-estimate AI drafts (App\Jobs\DraftEstimateSections): one
+        // Claude call that streams for one to three minutes while someone
+        // watches. They get their own supervisor because Horizon force-stops
+        // a worker it is scaling down once the SUPERVISOR's timeout has
+        // passed, whatever the job's own timeout says — on the default
+        // supervisor (60 s) a burst of other jobs could kill a draft midway.
+        // The timeout here stays above the job's 900 s.
+        'estimate-ai' => [
+            'connection' => 'redis',
+            'queue' => ['estimate-ai'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => 960,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -283,6 +304,11 @@ return [
             'timelapse' => [
                 'maxProcesses' => 1,
             ],
+            'estimate-ai' => [
+                'maxProcesses' => 3,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
         ],
 
         'local' => [
@@ -300,6 +326,9 @@ return [
             ],
             'timelapse' => [
                 'maxProcesses' => 1,
+            ],
+            'estimate-ai' => [
+                'maxProcesses' => 2,
             ],
         ],
     ],

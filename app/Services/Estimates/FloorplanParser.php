@@ -18,6 +18,15 @@ use Illuminate\Support\Facades\Http;
  */
 class FloorplanParser
 {
+    /** Seconds a picture or PDF gets when it is read inside a web request, which production cuts off at 60. */
+    public const READ_SECONDS_IN_REQUEST = 20;
+
+    /** …and when the background job that drafts the estimate reads it, with no page waiting on the answer. */
+    public const READ_SECONDS_IN_JOB = 60;
+
+    /** What a scan counts that an estimate hooks up, installs or works around; furniture is left out. */
+    public const APPLIANCES = ['fridges', 'stoves', 'ovens', 'dishwashers', 'sinks', 'microwaves', 'washers', 'dryers', 'washer/dryers', 'toilets', 'bathtubs', 'showers', 'fireplaces'];
+
     /**
      * Every layout measured; one is returned as it is, several are added up
      * (combineFloorplans) with each floor's own numbers kept.
@@ -108,6 +117,25 @@ class FloorplanParser
         ], fn ($value) => $value !== null && $value !== []);
     }
 
+    /**
+     * The rooms a layout names, each with its own measurements — what the
+     * generator lists as sections the moment a scan is uploaded. Only a room
+     * scan (a Polycam CSV) says which room each number belongs to; a picture
+     * or a PDF is measured as a whole, so it names none.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function rooms(UploadedFile $file): array
+    {
+        if (strtolower($file->getClientOriginalExtension()) !== 'csv') {
+            return [];
+        }
+
+        $metrics = $this->extractCsvFloorplanMetrics((string) file_get_contents($file->getRealPath()));
+
+        return array_values(array_filter((array) ($metrics['rooms'] ?? []), fn ($room) => is_array($room) && filled($room['name'] ?? null)));
+    }
+
     public function parseFloorplanFile(UploadedFile $file): ?array
     {
         $extension = $file->getClientOriginalExtension();
@@ -123,6 +151,28 @@ class FloorplanParser
             ], $metrics);
         }
 
+        return $this->readPicture((string) file_get_contents($file->getRealPath()), $filename, self::READ_SECONDS_IN_REQUEST);
+    }
+
+    /**
+     * Whether a layout file is a room scan — read on the spot, room by room —
+     * rather than a picture or PDF, which has to be sent off to be read.
+     */
+    public function isRoomScan(UploadedFile $file): bool
+    {
+        return strtolower($file->getClientOriginalExtension()) === 'csv';
+    }
+
+    /**
+     * A picture or PDF of a plan, read for the sizes written on it. A slow
+     * or failed reading is a note on the layout, never an exception: the
+     * draft goes ahead from the description.
+     *
+     * @return array<string, mixed>
+     */
+    public function readPicture(string $contents, string $filename, int $seconds = self::READ_SECONDS_IN_REQUEST): array
+    {
+        $extension = pathinfo($filename, PATHINFO_EXTENSION);
         $apiKey = config('services.ocr_space.api_key');
         $endpoint = config('services.ocr_space.endpoint');
 
@@ -134,19 +184,21 @@ class FloorplanParser
             ];
         }
 
-        $fileContents = file_get_contents($file->getRealPath());
+        try {
+            $response = Http::timeout($seconds)
+                ->attach('file', $contents, $filename)
+                ->post($endpoint, [
+                    'apikey' => $apiKey,
+                    'language' => 'eng',
+                    'isOverlayRequired' => 'false',
+                    'detectOrientation' => 'true',
+                    'OCREngine' => '2',
+                ]);
+        } catch (\Illuminate\Http\Client\ConnectionException) {
+            $response = null;
+        }
 
-        $response = Http::timeout(90)
-            ->attach('file', $fileContents, $filename)
-            ->post($endpoint, [
-                'apikey' => $apiKey,
-                'language' => 'eng',
-                'isOverlayRequired' => 'false',
-                'detectOrientation' => 'true',
-                'OCREngine' => '2',
-            ]);
-
-        if (! $response->successful()) {
+        if ($response === null || ! $response->successful()) {
             return [
                 'filename' => $filename,
                 'type' => $extension,
@@ -302,7 +354,10 @@ class FloorplanParser
      * depth (uppers are the shallow ones), with the countertop run as the
      * base cabinets plus what sits under the counter; the appliances by
      * count. Totals come from the "Entire Roomplan" rows when the export
-     * has them, else from the rooms.
+     * has them, else from the rooms. Each room also keeps what stands in it
+     * — its own cabinet runs and counter, its windows and doors, its
+     * appliances — so a section drafted for one room is sized from that
+     * room alone.
      *
      * @param  array<int, array<int, string>>  $rows  Room, Description, Value
      */
@@ -313,6 +368,9 @@ class FloorplanParser
         $cabinets = [];
         $underCounterWidths = [];
         $appliances = [];
+        $roomCabinets = [];
+        $roomUnderCounter = [];
+        $bounding = [];
         $skipRooms = ['entire roomplan', 'key', 'settings', ''];
 
         foreach ($rows as $row) {
@@ -342,9 +400,16 @@ class FloorplanParser
                 $rooms[$room]['wall_sqft'] = $this->parsePolycamValue($value);
             } elseif ($perRoom && str_starts_with($description, 'ceiling height')) {
                 $rooms[$room]['ceiling_height_ft'] = $this->parsePolycamFeetInches($value);
+                // A sloped or stepped ceiling reads "9' 9\" - 14' 4\"": keep the high side too.
+                $heights = array_filter(array_map(fn ($part) => $this->parsePolycamFeetInches($part), preg_split('/\s+-\s+/', $value) ?: []));
+                if (count($heights) > 1) {
+                    $rooms[$room]['ceiling_height_max_ft'] = max($heights);
+                }
             } elseif ($perRoom && str_starts_with($description, 'perimeter')) {
                 $rooms[$room]['perimeter_ft'] = $this->parsePolycamFeetInches($value);
-            } elseif ($perRoom && str_starts_with($description, 'dimensions') && ! str_contains($description, 'bounding')) {
+            } elseif ($perRoom && str_starts_with($description, 'dimensions') && str_contains($description, 'bounding')) {
+                $bounding[$room] = preg_replace('/\s+/', ' ', $value);
+            } elseif ($perRoom && str_starts_with($description, 'dimensions')) {
                 $rooms[$room]['dimensions'] = preg_replace('/\s+/', ' ', $value);
             } elseif ($perRoom && str_contains($description, 'windows total casing length')) {
                 $rooms[$room]['window_casing_lf'] = $this->parsePolycamFeetInches($value);
@@ -353,11 +418,42 @@ class FloorplanParser
             } elseif ($perRoom && str_starts_with($description, 'cabinet dimensions')) {
                 if ($dims = $this->parsePolycamDimensions($value)) {
                     $cabinets[] = $dims;
+                    $roomCabinets[$room][] = $dims;
                 }
-            } elseif ($perRoom && str_starts_with($description, 'dishwasher dimensions')) {
-                if ($dims = $this->parsePolycamDimensions($value)) {
+            } elseif ($perRoom && str_starts_with($description, 'window dimensions')) {
+                $size = $this->parsePolycamSizes($value);
+                $rooms[$room]['window_count'] = ($rooms[$room]['window_count'] ?? 0) + 1;
+                if (count($size) >= 2) {
+                    $rooms[$room]['window_area_sqft'] = ($rooms[$room]['window_area_sqft'] ?? 0) + $size[0] * $size[1];
+                }
+            } elseif ($perRoom && str_starts_with($description, 'door dimensions')) {
+                $rooms[$room]['door_count'] = ($rooms[$room]['door_count'] ?? 0) + 1;
+            } elseif ($perRoom && preg_match('/^(.+?) dimensions \(w x h x d\)/', $description, $m)) {
+                $kind = str_replace(' ', '_', trim($m[1])).'s';
+
+                if (in_array($kind, self::APPLIANCES, true)) {
+                    $rooms[$room]['appliances'][$kind] = ($rooms[$room]['appliances'][$kind] ?? 0) + 1;
+                }
+
+                if ($kind === 'dishwashers' && ($dims = $this->parsePolycamDimensions($value))) {
                     $underCounterWidths[] = $dims[0];
+                    $roomUnderCounter[$room][] = $dims[0];
                 }
+            }
+        }
+
+        foreach ($roomCabinets as $room => $boxes) {
+            $rooms[$room] += self::cabinetRuns($boxes, $roomUnderCounter[$room] ?? []);
+        }
+
+        // The scan found no rectangle that fits inside (inscribed 0' x 0'):
+        // a sliver left between rooms, not a room. It keeps its outer size
+        // and is marked, so the generator can put it with the room it is
+        // part of rather than offer it as a section of its own.
+        foreach ($rooms as $room => $measured) {
+            if (isset($measured['dimensions']) && array_sum($this->parsePolycamSizes($measured['dimensions'])) <= 0) {
+                $rooms[$room]['dimensions'] = $bounding[$room] ?? null;
+                $rooms[$room]['sliver'] = true;
             }
         }
 
@@ -369,13 +465,7 @@ class FloorplanParser
         $wallSqft = $round($totals['wall_sqft'] ?? $sum('wall_sqft'));
         $ceilingHeight = $round(collect($rooms)->pluck('ceiling_height_ft')->filter()->max());
 
-        // Base cabinets stand deep (about 2'); uppers are the shallow boxes
-        // (about 1'). Tall pantries (5'+) are neither. Widths add up to the
-        // run in linear feet — what cabinet and countertop items are sized by.
-        $base = collect($cabinets)->filter(fn ($c) => $c[2] >= 1.75 && $c[1] < 5);
-        $upper = collect($cabinets)->filter(fn ($c) => $c[2] < 1.75);
-        $tall = collect($cabinets)->filter(fn ($c) => $c[2] >= 1.75 && $c[1] >= 5);
-        $baseLf = $round($base->sum(fn ($c) => $c[0]));
+        $runs = self::cabinetRuns($cabinets, $underCounterWidths);
 
         return array_filter([
             'floor_sqft' => $floorSqft,
@@ -389,13 +479,57 @@ class FloorplanParser
             'window_casing_lf' => $round($sum('window_casing_lf')),
             'door_casing_lf' => $round($sum('door_casing_lf')),
             'cabinet_count' => $cabinets !== [] ? count($cabinets) : ($appliances['cabinets'] ?? null),
+            'base_cabinet_lf' => $runs['base_cabinet_lf'] ?? null,
+            'upper_cabinet_lf' => $runs['upper_cabinet_lf'] ?? null,
+            'tall_cabinet_lf' => $runs['tall_cabinet_lf'] ?? null,
+            'countertop_lf' => $runs['countertop_lf'] ?? null,
+            'appliances' => array_filter(array_intersect_key($appliances, array_flip(self::APPLIANCES))),
+            'rooms' => array_map(fn ($r) => array_filter(array_map(fn ($v) => is_float($v) ? round($v, 2) : $v, $r), fn ($v) => $v !== null && $v !== ''), $rooms),
+        ], fn ($v) => $v !== null && $v !== [] && $v !== 0);
+    }
+
+    /**
+     * A set of cabinet boxes as runs in linear feet. Base cabinets stand deep
+     * (about 2'); uppers are the shallow boxes (about 1'). Tall pantries
+     * (5'+) are neither. Widths add up to the run — what cabinet and
+     * countertop items are sized by — and the counter also covers what sits
+     * under it (a dishwasher).
+     *
+     * @param  list<array{0: float, 1: float, 2: float}>  $cabinets  [width, height, depth] in feet
+     * @param  list<float>  $underCounterWidths
+     * @return array<string, float|int>
+     */
+    protected static function cabinetRuns(array $cabinets, array $underCounterWidths = []): array
+    {
+        if ($cabinets === []) {
+            return [];
+        }
+
+        $round = fn ($v) => is_numeric($v) && $v > 0 ? round((float) $v, 2) : null;
+        $base = collect($cabinets)->filter(fn ($c) => $c[2] >= 1.75 && $c[1] < 5);
+        $upper = collect($cabinets)->filter(fn ($c) => $c[2] < 1.75);
+        $tall = collect($cabinets)->filter(fn ($c) => $c[2] >= 1.75 && $c[1] >= 5);
+        $baseLf = $round($base->sum(fn ($c) => $c[0]));
+
+        return array_filter([
+            'cabinet_count' => count($cabinets),
             'base_cabinet_lf' => $baseLf,
             'upper_cabinet_lf' => $round($upper->sum(fn ($c) => $c[0])),
             'tall_cabinet_lf' => $round($tall->sum(fn ($c) => $c[0])),
             'countertop_lf' => $baseLf !== null ? round($baseLf + array_sum($underCounterWidths), 2) : null,
-            'appliances' => array_filter(array_intersect_key($appliances, array_flip(['fridges', 'stoves', 'ovens', 'dishwashers', 'sinks', 'microwaves', 'washers', 'dryers', 'toilets', 'bathtubs', 'showers']))),
-            'rooms' => array_map(fn ($r) => array_filter(array_map(fn ($v) => is_float($v) ? round($v, 2) : $v, $r), fn ($v) => $v !== null && $v !== ''), $rooms),
-        ], fn ($v) => $v !== null && $v !== [] && $v !== 0);
+        ], fn ($v) => $v !== null);
+    }
+
+    /**
+     * "4' 0\" x 10' 3\"" -> [4.0, 10.25]: every size in the value, in feet.
+     *
+     * @return list<float>
+     */
+    public function parsePolycamSizes(string $value): array
+    {
+        $parts = array_map('trim', preg_split('/\s*[x×]\s*/i', $value) ?: []);
+
+        return array_values(array_filter(array_map(fn ($part) => $this->parsePolycamFeetInches($part), $parts), fn ($size) => $size !== null));
     }
 
     /** "3' 11\" x 3'  0\" x 2'  2\"" -> [width, height, depth] in feet, or null. */

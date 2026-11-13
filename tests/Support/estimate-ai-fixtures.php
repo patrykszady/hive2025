@@ -34,12 +34,15 @@ class FakeClaudeEstimateService extends EstimateAIService
     /** Text pieces handed to the caller when the reply was streamed. */
     public array $streamedChunks = [];
 
+    /** Called with the number of text pieces streamed so far, before each one — a test's way in mid-draft. */
+    public ?\Closure $beforeChunk = null;
+
     public function __construct(public array $reply = ['text' => '{"reasoning":"","line_items":[]}', 'stop_reason' => 'end_turn'])
     {
         parent::__construct();
     }
 
-    protected function complete(array $request, ?callable $onText = null): array
+    protected function complete(array $request, ?callable $onText = null, ?callable $onEvent = null): array
     {
         $this->sentRequests[] = $request;
 
@@ -47,7 +50,9 @@ class FakeClaudeEstimateService extends EstimateAIService
             // The reply arrives the way the API streams it: in small pieces that
             // split objects, keys and numbers wherever they fall.
             foreach (str_split($this->reply['text'], 7) as $chunk) {
+                $this->beforeChunk !== null && ($this->beforeChunk)(count($this->streamedChunks));
                 $this->streamedChunks[] = $chunk;
+                $onEvent !== null && $onEvent();
                 $onText($chunk);
             }
         }
@@ -129,30 +134,66 @@ function capturingLivewireStream(callable $callback): string
 }
 
 /**
- * A company admin with the generator open on the fixture estimate, and Claude
- * faked to draft a demo and forty square feet of floor tile.
+ * A whole-estimate reply the way Claude writes it: the job's reasoning, then
+ * each section with its key, name, scope and line items.
+ *
+ * @param  list<array{0: string, 1: string, 2: string, 3: list<array{0: \App\Models\LineItem, 1: int|float}>}>  $sections  [key, name, scope, [[catalog item, quantity], ...]]
  */
-function draftingGenerator(): array
+function sectionsReply(array $sections, string $reasoning = '', string $stopReason = 'end_turn'): array
 {
-    $fx = claudeEstimateFixture();
-    $c = $fx['catalog'];
-    // Only a company admin may change an estimate.
+    return [
+        'text' => json_encode(['reasoning' => $reasoning, 'sections' => array_map(fn (array $section) => [
+            'key' => $section[0],
+            'name' => $section[1],
+            'scope' => $section[2],
+            'line_items' => array_map(fn (array $line) => ['line_item_id' => $line[0]->id, 'quantity' => $line[1]], $section[3]),
+        ], $sections)]),
+        'stop_reason' => $stopReason,
+    ];
+}
+
+/** Claude faked to answer with these sections. */
+function claudeDrafts(array $sections, string $reasoning = '', string $stopReason = 'end_turn'): FakeClaudeEstimateService
+{
+    $fake = new FakeClaudeEstimateService(sectionsReply($sections, $reasoning, $stopReason));
+    app()->instance(EstimateAIService::class, $fake);
+
+    return $fake;
+}
+
+/** The fixture's user as a company admin — only an admin may change an estimate. */
+function estimateAdmin(array $fx): array
+{
     $fx['user']->vendors()->attach($fx['vendor']->id, ['role_id' => 1, 'is_employed' => 1]);
     $fx['user']->refresh();
 
-    app()->instance(EstimateAIService::class, new FakeClaudeEstimateService([
-        'text' => json_encode(['reasoning' => 'Hall bath.', 'line_items' => [
-            ['line_item_id' => $c['Demo Bathroom']->id, 'quantity' => 1],
-            ['line_item_id' => $c['Floor Tile']->id, 'quantity' => 40],
-        ]]),
-        'stop_reason' => 'end_turn',
-    ]));
+    return $fx;
+}
+
+/** Ticks the row of a section already on the estimate, so the draft adds to it. */
+function tickSection($component, int $sectionId)
+{
+    $index = array_search($sectionId, array_column($component->get('sectionRows'), 'section_id'), true);
+
+    return $component->set("sectionRows.{$index}.include", true);
+}
+
+/**
+ * A company admin with the generator open on the fixture estimate, its Hall
+ * Bath section ticked, and Claude faked to draft a demo and forty square
+ * feet of floor tile into it.
+ */
+function draftingGenerator(): array
+{
+    $fx = estimateAdmin(claudeEstimateFixture());
+    $c = $fx['catalog'];
+
+    claudeDrafts([['S1', 'Hall Bath', 'Hall bath.', [[$c['Demo Bathroom'], 1], [$c['Floor Tile'], 40]]]], 'Hall bath.');
 
     $component = Livewire::test(EstimateAIGenerator::class, ['estimate' => $fx['estimate']])
-        ->set('sectionId', $fx['section']->id)
         ->set('inquiry', 'Hall bath: new tile floor and shower.');
 
-    return [$fx, $component];
+    return [$fx, tickSection($component, $fx['section']->id)];
 }
 
 function draftedLines(array $fx)

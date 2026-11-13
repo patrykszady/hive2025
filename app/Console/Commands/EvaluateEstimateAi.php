@@ -111,9 +111,13 @@ class EvaluateEstimateAi extends Command
         }
 
         // Kept drafts, newest first, one per section: their enquiry and the section as the estimator left it.
+        // A section drafted as one of several in a whole-estimate run is left
+        // out: its enquiry describes every room of the job, so drafting it
+        // again on its own would be scored against one room's lines.
         return EstimateAiDraft::query()
             ->where('vendor_id', $vendorId)
             ->where('status', '!=', EstimateAiDraft::DISCARDED)
+            ->where(fn ($query) => $query->whereNull('run_id')->orWhereHas('run', fn ($run) => $run->has('drafts', '=', 1)))
             ->with(['section' => fn ($q) => $q->withCount('estimate_line_items')])
             ->latest('id')
             ->get()

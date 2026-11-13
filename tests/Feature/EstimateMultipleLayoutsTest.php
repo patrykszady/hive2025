@@ -78,7 +78,7 @@ it('takes layouts one after another, names them, and drafts from all of them', f
         ->assertDontSee('garage.csv')
         ->set('floorplanLabels.1', 'Upstairs');
 
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     $service = app(EstimateAIService::class);
     $prompt = collect($service->sentRequests[0]['messages'])->pluck('content')->implode("\n");

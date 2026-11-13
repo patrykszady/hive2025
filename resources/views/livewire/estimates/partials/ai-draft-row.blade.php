@@ -1,5 +1,5 @@
-{{-- One drafted line, laid out like a line on the estimate itself. Streamed
-     in while Claude drafts ($editable false) and shown again, now clickable
+{{-- One drafted line, laid out like a line on the estimate itself. Shown
+     read-only while Claude drafts ($editable false) and again, now clickable
      and with a live quantity box, once the draft is complete. Both modes
      keep the same cells so the table never changes shape. The row's key
      carries its position: the quantity box, the live total and the remove
@@ -16,9 +16,9 @@
 @endphp
 <flux:table.row
     :class="$editable ? '' : 'animate-fade-in'"
-    :wire:key="$editable ? 'draft-line-'.($item['id'] ?? 'new').'-at-'.$index : null"
+    :wire:key="'draft-line-'.($item['id'] ?? 'new').'-at-'.$index"
 >
-    <flux:table.cell class="align-top !pl-6">{{ $index + 1 }}.</flux:table.cell>
+    <flux:table.cell class="align-top !pl-6">{{ $number ?? $index + 1 }}.</flux:table.cell>
     <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
         <div class="flex flex-col min-w-0">
             <div class="leading-5">
@@ -46,7 +46,7 @@
     <flux:table.cell variant="strong" class="align-top" :x-text="$editable ? 'money(lineTotal('.$index.'))' : null">{{ money($quantity * $cost) }}</flux:table.cell>
     <flux:table.cell class="align-top !pr-6">
         @if($editable)
-            <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="removeItem({{ $index }}{{ !empty($item['id']) ? ', '.(int) $item['id'] : '' }})" />
+            <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="removeItem({{ $index }}{{ !empty($item['id']) ? ', '.(int) $item['id'] : '' }})" aria-label="Remove {{ $item['name'] ?? 'this line' }}" />
         @else
             <flux:icon.check class="w-4 h-4 text-green-500 draft-row-done" />
             <flux:icon.arrow-path class="w-4 h-4 text-indigo-500 animate-spin draft-row-current" />

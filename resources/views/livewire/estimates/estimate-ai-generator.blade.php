@@ -1,8 +1,18 @@
-<div>
-    <flux:modal name="estimate-ai-generator-modal" class="w-full max-w-5xl space-y-6" :dismissible="false">
+{{-- When the estimate page behind re-renders with sections a draft has just
+     added, it lifts this element out and puts it back — and a dialog that
+     leaves the page comes back open but no longer on top (2026-11-13: the
+     review showed inline under the estimate). stayOnTop() puts it back. --}}
+<div x-data="aiGeneratorWindow()" x-init="watch({{ $isGenerating ? 'true' : 'false' }})">
+    {{-- A draft still being written when the window is shut is checked on here, quietly and slowly;
+         the lively once-a-second follow belongs to the open window below. --}}
+    @if($isGenerating && ! $windowOpen)
+        <div class="hidden" wire:poll.5s="pollDraft" data-quiet-follow></div>
+    @endif
+
+    <flux:modal name="estimate-ai-generator-modal" class="w-full max-w-5xl space-y-6" :dismissible="false" @close="windowClosed">
         <div>
             <flux:heading size="lg">AI Estimate Generator</flux:heading>
-            <flux:text class="mt-2">Describe the work and optionally upload floorplans, one layout per floor. Claude drafts line items from your catalog and your past estimates straight onto the estimate for you to review — leave out the client's contact details.</flux:text>
+            <flux:text class="mt-2">Describe the job and optionally upload floorplans, one layout per floor. Claude drafts the whole estimate, section by section, from your catalog and your past estimates, straight onto the estimate for you to review — leave out the client's contact details.</flux:text>
         </div>
 
         @if($showRules)
@@ -65,72 +75,120 @@
                     <flux:button variant="ghost" icon="arrow-left" wire:click="$set('showRules', false)">Back</flux:button>
                 </div>
             </div>
-        @elseif(!$showPreview)
-            <form wire:submit="generate" x-on:submit="$dispatch('draft-start')" class="space-y-4">
-                {{-- The description, hidden while drafting so the table sits where it will stay --}}
-                <div wire:loading.remove wire:target="generate" class="space-y-4">
-                    {{-- Section Selector --}}
-                    <flux:select wire:model="sectionId" label="Add to Section">
-                        @foreach($sections as $section)
-                            <flux:select.option value="{{ $section->id }}">
-                                {{ $section->name ?: 'Unnamed Section' }}
-                            </flux:select.option>
-                        @endforeach
-                    </flux:select>
+        @elseif($isGenerating)
+            {{-- DRAFTING: a queued job is writing the estimate; this follows it --}}
+            <div class="space-y-4" @if($windowOpen) wire:poll.1s="pollDraft" @endif>
+                <div class="flex items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                    <div class="relative">
+                        <flux:icon.sparkles class="w-5 h-5 text-indigo-500 animate-pulse" />
+                        <div class="absolute inset-0 animate-ping">
+                            <flux:icon.sparkles class="w-5 h-5 text-indigo-400 opacity-50" />
+                        </div>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-medium text-indigo-700 dark:text-indigo-300">{{ $draftStatus }}</p>
+                        <p class="text-xs text-indigo-500 dark:text-indigo-400">Each line lands on the estimate, under its own section, as it is drafted. A whole estimate takes a minute or two; it carries on if you close this page.</p>
+                    </div>
+                    <flux:button size="sm" variant="ghost" icon="stop" class="shrink-0 whitespace-nowrap" wire:click="stopDraft" wire:confirm="Stop drafting? The lines drafted so far stay for you to review.">Stop</flux:button>
+                </div>
 
-                    {{-- Inquiry Input --}}
-                    <flux:textarea
-                        wire:model="inquiry"
-                        label="Describe the Work"
-                        placeholder="e.g., Rip and replace this bathroom. Replace the tub, vanities, tiles. Install 3 new vanity light fixture locations, a new exhaust fan, and 3 recessed lights."
-                        rows="4"
-                        required
-                    />
-                    @error('inquiry')
+                @include('livewire.estimates.partials.ai-draft-table', ['mode' => 'drafting', 'items' => $generatedItems, 'total' => $estimatedTotal])
+            </div>
+        @elseif(!$showPreview)
+            {{-- Not a form: Enter in a section name or a note must never start a draft (2026-11-13) — only the
+                 Generate button does. Enter in one of those boxes just finishes the box. --}}
+            <div class="space-y-4" data-generator-form x-on:keydown.enter="if ($event.target.matches('input:not([type=checkbox]):not([type=file])')) { $event.preventDefault(); $event.target.blur() }">
+                {{-- Inquiry Input --}}
+                {{-- Sent when the box is left, so what is typed is kept even through a reload. --}}
+                <flux:textarea
+                    wire:model.blur="inquiry"
+                    label="Describe the Work"
+                    placeholder="e.g., Rip and replace the kitchen and remove the pantry closet. New engineered flooring, baseboard and casings throughout the first floor. Paint every room. Replace the foyer chandelier."
+                    rows="4"
+                    required
+                />
+                @error('inquiry')
+                    <flux:text variant="danger">{{ $message }}</flux:text>
+                @enderror
+
+                {{-- What was typed for this estimate before: nothing is typed, uploaded or merged twice (2026-11-13) --}}
+                @if($earlierRequests !== [])
+                    <div data-earlier-requests>
+                        <flux:label>Earlier requests on this estimate</flux:label>
+                        <div class="mt-2 divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-white/5 dark:border-white/10">
+                            @foreach($earlierRequests as $earlier)
+                                <div class="flex items-start gap-3 px-3 py-2.5" wire:key="earlier-request-{{ $earlier['id'] }}">
+                                    <div class="min-w-0 flex-1">
+                                        <p class="line-clamp-2 text-sm text-zinc-800 dark:text-white" title="{{ $earlier['inquiry'] }}">{{ $earlier['inquiry'] }}</p>
+                                        <p class="mt-0.5 text-xs text-zinc-500">{{ $earlier['when'] }}{{ $earlier['by'] ? ' · '.$earlier['by'] : '' }}{{ $earlier['sections'] > 0 ? ' · '.$earlier['sections'].' '.\Illuminate\Support\Str::plural('section', $earlier['sections']) : '' }} · {{ $earlier['outcome'] }}</p>
+                                    </div>
+                                    <div class="flex shrink-0 items-center gap-1">
+                                        @if($earlier['on_estimate'] > 0)
+                                            <flux:button size="xs" variant="ghost" icon="trash" wire:click="removeDraft({{ $earlier['id'] }})" wire:confirm="Remove that draft's {{ $earlier['on_estimate'] }} line items, and the sections it added, from the estimate?">Remove its draft</flux:button>
+                                        @endif
+                                        <flux:button size="xs" variant="filled" icon="arrow-uturn-left" wire:click="useRequest({{ $earlier['id'] }})">Use again</flux:button>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
+                {{-- Floorplan uploads: one layout per floor, each named (2026-09-30) --}}
+                <div>
+                    <flux:label>Floorplans (Optional, CSV preferred)</flux:label>
+                    <flux:text size="sm" class="mt-1">Add one layout per floor (a second floor, a basement). A room scan (CSV) lists its rooms below as sections straight away; a picture or a PDF is read after you click Generate.</flux:text>
+                    <div class="mt-2">
+                        <input
+                            type="file"
+                            wire:model="newFloorplans"
+                            multiple
+                            accept=".pdf,.jpg,.jpeg,.png,.csv"
+                            class="block w-full text-sm text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-100 file:text-zinc-700 hover:file:bg-zinc-200 dark:file:bg-zinc-800 dark:file:text-zinc-300 dark:hover:file:bg-zinc-700"
+                        />
+                    </div>
+                    <flux:text wire:loading wire:target="newFloorplans" size="sm" class="mt-2">Uploading and reading the rooms…</flux:text>
+                    @foreach($floorplans as $index => $layout)
+                        <div class="mt-2 flex items-end gap-2" wire:key="floorplan-{{ $index }}-{{ $layout->getFilename() }}">
+                            <div class="w-40 shrink-0">
+                                <flux:input wire:model.blur="floorplanLabels.{{ $index }}" size="sm" aria-label="Layout name" />
+                            </div>
+                            <flux:text class="min-w-0 flex-1 truncate pb-1.5" title="{{ $layout->getClientOriginalName() }}">
+                                <flux:icon.check class="inline size-4 text-green-600 dark:text-green-400" />
+                                {{ $layout->getClientOriginalName() }}
+                            </flux:text>
+                            <flux:button size="sm" variant="ghost" icon="x-mark" wire:click="removeFloorplan({{ $index }})" aria-label="Remove {{ $layout->getClientOriginalName() }}" />
+                        </div>
+                    @endforeach
+                    @error('newFloorplans.*')
                         <flux:text variant="danger">{{ $message }}</flux:text>
                     @enderror
+                </div>
 
-                    {{-- Floorplan uploads: one layout per floor, each named (2026-09-30) --}}
-                    <div>
-                        <flux:label>Floorplans (Optional, CSV preferred)</flux:label>
-                        <flux:text size="sm" class="mt-1">Add one layout per floor (a second floor, a basement); each is measured and the numbers are added up.</flux:text>
-                        <div class="mt-2">
-                            <input
-                                type="file"
-                                wire:model="newFloorplans"
-                                multiple
-                                accept=".pdf,.jpg,.jpeg,.png,.csv"
-                                class="block w-full text-sm text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-100 file:text-zinc-700 hover:file:bg-zinc-200 dark:file:bg-zinc-800 dark:file:text-zinc-300 dark:hover:file:bg-zinc-700"
-                            />
-                        </div>
-                        <flux:text wire:loading wire:target="newFloorplans" size="sm" class="mt-2">Uploading…</flux:text>
-                        @foreach($floorplans as $index => $layout)
-                            <div class="mt-2 flex items-end gap-2" wire:key="floorplan-{{ $index }}-{{ $layout->getFilename() }}">
-                                <div class="w-40 shrink-0">
-                                    <flux:input wire:model.blur="floorplanLabels.{{ $index }}" size="sm" aria-label="Layout name" />
-                                </div>
-                                <flux:text class="min-w-0 flex-1 truncate pb-1.5" title="{{ $layout->getClientOriginalName() }}">
-                                    <flux:icon.check class="inline size-4 text-green-600 dark:text-green-400" />
-                                    {{ $layout->getClientOriginalName() }}
-                                </flux:text>
-                                <flux:button size="sm" variant="ghost" icon="x-mark" wire:click="removeFloorplan({{ $index }})" aria-label="Remove {{ $layout->getClientOriginalName() }}" />
-                            </div>
-                        @endforeach
-                        @error('newFloorplans.*')
-                            <flux:text variant="danger">{{ $message }}</flux:text>
-                        @enderror
-                    </div>
+                {{-- The sections this draft fills: a scan's rooms, typed ones, and what is on the estimate already --}}
+                @if($reusedStanding > 0)
+                    <flux:callout variant="warning" icon="exclamation-triangle" data-reused-standing>
+                        <flux:callout.heading>That request's draft is still on the estimate</flux:callout.heading>
+                        <flux:callout.text>{{ $reusedStanding }} {{ \Illuminate\Support\Str::plural('line item', $reusedStanding) }} from it {{ $reusedStanding === 1 ? 'is' : 'are' }} there now. Generating again adds every line a second time unless you take that draft off first.</flux:callout.text>
+                        <x-slot name="actions">
+                            <flux:button size="sm" icon="trash" wire:click="removeDraft({{ $reusedRunId }})" wire:confirm="Remove that draft's {{ $reusedStanding }} line items, and the sections it added, from the estimate?">Remove that draft first</flux:button>
+                        </x-slot>
+                    </flux:callout>
+                @endif
 
-                    {{-- Error Message --}}
-                    @if($error)
-                        <flux:callout variant="danger" icon="exclamation-triangle">
-                            <flux:callout.heading>Error</flux:callout.heading>
-                            <flux:callout.text>{{ $error }}</flux:callout.text>
-                        </flux:callout>
-                    @endif
+                @include('livewire.estimates.partials.ai-section-rows')
 
-                    {{-- Actions --}}
-                    <div class="flex items-center justify-between gap-3 flex-nowrap">
+                {{-- Error Message --}}
+                @if($error)
+                    <flux:callout variant="danger" icon="exclamation-triangle">
+                        <flux:callout.heading>Error</flux:callout.heading>
+                        <flux:callout.text>{{ $error }}</flux:callout.text>
+                    </flux:callout>
+                @endif
+
+                {{-- Actions --}}
+                <div class="flex items-center justify-between gap-3 flex-nowrap">
+                    <div class="flex items-center gap-1">
                         <flux:button variant="ghost" size="sm" icon="adjustments-horizontal" class="whitespace-nowrap" wire:click="$set('showRules', true)">
                             How we estimate
                             <flux:badge size="sm" color="zinc" class="ml-1">{{ $activeRules->count() }}</flux:badge>
@@ -138,50 +196,28 @@
                                 <flux:badge size="sm" color="amber" class="ml-1">{{ $proposedRules->count() }} proposed</flux:badge>
                             @endif
                         </flux:button>
-                        <div class="flex items-center gap-3">
-                        <flux:button variant="ghost" class="whitespace-nowrap inline-flex items-center" x-on:click="$flux.modal('estimate-ai-generator-modal').close()">
-                            Cancel
-                        </flux:button>
-                        <flux:button type="submit" variant="primary" icon="sparkles" class="whitespace-nowrap inline-flex items-center" :disabled="$isGenerating">
-                            Generate Estimate
-                        </flux:button>
-                        </div>
+                        {{-- The form keeps what was typed and set up; this is the way back to an empty one. --}}
+                        @if($inquiry !== '' || $floorplans !== [] || collect($sectionRows)->where('kind', '!=', 'existing')->isNotEmpty())
+                            <flux:button variant="ghost" size="sm" icon="arrow-path" class="whitespace-nowrap" wire:click="startOver" wire:confirm="Clear the description, the scans and the sections listed here?">Start over</flux:button>
+                        @endif
+                    </div>
+                    <div class="flex items-center gap-3">
+                    <flux:button variant="ghost" class="whitespace-nowrap inline-flex items-center" x-on:click="$flux.modal('estimate-ai-generator-modal').close()">
+                        Cancel
+                    </flux:button>
+                    <flux:button type="button" variant="primary" icon="sparkles" class="whitespace-nowrap inline-flex items-center" wire:click="generate" wire:loading.attr="disabled" wire:target="generate">
+                        Generate Estimate
+                    </flux:button>
                     </div>
                 </div>
-
-                {{-- Drafting: the banner and table the finished draft is then reviewed in --}}
-                <div
-                    wire:loading
-                    wire:target="generate"
-                    class="space-y-4"
-                    x-data="draftStream()"
-                    x-init="$nextTick(() => start())"
-                    x-on:draft-start.window="start()"
-                >
-                    <div class="flex items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                        <div class="relative">
-                            <flux:icon.sparkles class="w-5 h-5 text-indigo-500 animate-pulse" />
-                            <div class="absolute inset-0 animate-ping">
-                                <flux:icon.sparkles class="w-5 h-5 text-indigo-400 opacity-50" />
-                            </div>
-                        </div>
-                        <div>
-                            <p class="text-sm font-medium text-indigo-700 dark:text-indigo-300" x-show="!streaming" x-text="statusMessages[currentStatus]">Reading your description…</p>
-                            <p class="text-sm font-medium text-indigo-700 dark:text-indigo-300" x-show="streaming" wire:stream="draft-status" x-ref="status"></p>
-                            <p class="text-xs text-indigo-500 dark:text-indigo-400">Each line lands on {{ $sectionName }} as it is drafted. This usually takes 20-40 seconds.</p>
-                        </div>
-                    </div>
-
-                    @include('livewire.estimates.partials.ai-draft-table', ['mode' => 'drafting'])
-                </div>
-            </form>
+            </div>
         @else
             {{-- DRAFT COMPLETE: the same banner and table, now on the estimate --}}
             <div class="space-y-4">
                 <div class="flex items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
                     <flux:icon.check-circle class="w-5 h-5 text-indigo-500" />
                     <div>
-                        <p class="text-sm font-medium text-indigo-700 dark:text-indigo-300">{{ count($generatedItems) }} {{ count($generatedItems) === 1 ? 'line item' : 'line items' }} drafted into {{ $sectionName }}</p>
+                        <p class="text-sm font-medium text-indigo-700 dark:text-indigo-300">{{ count($generatedItems) }} {{ count($generatedItems) === 1 ? 'line item' : 'line items' }} drafted into {{ $draftedInto }}</p>
                         <p class="text-xs text-indigo-500 dark:text-indigo-400">Click a line to edit it, change a quantity here, or remove what you don't need. Nothing else on the estimate changed.</p>
                     </div>
                 </div>
@@ -190,6 +226,19 @@
                     <flux:callout variant="warning" icon="exclamation-triangle">
                         <flux:callout.heading>The draft stopped early</flux:callout.heading>
                         <flux:callout.text>{{ $error }} The lines below were drafted before it stopped.</flux:callout.text>
+                    </flux:callout>
+                @endif
+
+                @if($request !== '')
+                    <div class="flex items-start gap-2 text-sm text-zinc-500 dark:text-zinc-400" data-request>
+                        <flux:icon.chat-bubble-left-ellipsis class="mt-0.5 size-4 shrink-0" />
+                        <p class="whitespace-pre-line"><span class="font-medium text-zinc-700 dark:text-zinc-200">{{ $requestBy !== '' ? $requestBy.' asked:' : 'You asked:' }}</span> {{ $request }}</p>
+                    </div>
+                @endif
+
+                @if($leftOut !== [])
+                    <flux:callout variant="secondary" icon="information-circle">
+                        <flux:callout.text>Nothing was drafted for {{ implode(', ', $leftOut) }}: the description gave no work there, so {{ count($leftOut) === 1 ? 'that section was' : 'those sections were' }} not added.</flux:callout.text>
                     </flux:callout>
                 @endif
 
@@ -207,51 +256,42 @@
 
                 {{-- Actions --}}
                 <div class="flex items-center justify-between gap-3 flex-nowrap">
-                    <flux:button variant="ghost" class="whitespace-nowrap" icon="trash" wire:click="discardDraft" wire:confirm="Remove every drafted line item from the estimate?">
+                    <flux:button variant="ghost" class="whitespace-nowrap" icon="trash" wire:click="discardDraft" wire:confirm="Remove every drafted line item, and the sections this draft added, from the estimate?">
                         Discard Draft
                     </flux:button>
-                    <flux:button variant="primary" class="whitespace-nowrap" icon="check" wire:click="finish">
-                        Done
-                    </flux:button>
+                    <div class="flex items-center gap-2">
+                        @if($repeatsAcrossSections)
+                            <flux:button variant="filled" class="whitespace-nowrap" icon="arrows-pointing-in" wire:click="finishAndCombine">
+                                Done, then combine items
+                            </flux:button>
+                        @endif
+                        <flux:button variant="primary" class="whitespace-nowrap" icon="check" wire:click="finish">
+                            Done
+                        </flux:button>
+                    </div>
                 </div>
             </div>
         @endif
 
-        {{-- Defined at the root so both exist from the first paint: a <script>
+        {{-- Defined at the root so it exists from the first paint: a <script>
              morphed in with a later render is never executed. --}}
         <script>
-            function draftStream() {
+            function aiGeneratorWindow() {
                 return {
-                    streaming: false,
-                    currentStatus: 0,
-                    timer: null,
-                    observer: null,
-                    statusMessages: [
-                        'Reading your description…',
-                        'Reviewing your line item catalog…',
-                        'Comparing with your past estimates…',
-                        'Working out quantities…',
-                    ],
-                    start() {
-                        this.streaming = false;
-                        this.currentStatus = 0;
-                        this.$refs.rows.innerHTML = '';
-                        this.$refs.status.innerHTML = '';
-                        this.$refs.total.textContent = '$0.00';
+                    // followingOnLoad: the page loaded while this person's draft is still being written.
+                    watch(followingOnLoad) {
+                        new MutationObserver(() => this.stayOnTop()).observe(this.$el.parentElement, { childList: true });
 
-                        clearInterval(this.timer);
-                        this.timer = setInterval(() => {
-                            if (! this.streaming) {
-                                this.currentStatus = (this.currentStatus + 1) % this.statusMessages.length;
-                            }
-                        }, 2500);
+                        if (followingOnLoad) {
+                            setTimeout(() => this.$flux.modal('estimate-ai-generator-modal').show(), 300);
+                        }
+                    },
+                    stayOnTop() {
+                        const dialog = this.$el.querySelector('dialog');
 
-                        // The first streamed row ends the "thinking" messages.
-                        if (! this.observer) {
-                            this.observer = new MutationObserver(() => {
-                                this.streaming = this.$refs.rows.children.length > 0;
-                            });
-                            this.observer.observe(this.$refs.rows, { childList: true });
+                        if (dialog && dialog.isConnected && dialog.open && ! dialog.matches(':modal')) {
+                            dialog.removeAttribute('open');
+                            dialog.showModal();
                         }
                     },
                 };
@@ -260,13 +300,19 @@
             // Totals follow the quantity boxes as they are typed; the line itself is saved a moment later.
             function draftPreview() {
                 return {
+                    amount(item) {
+                        return (Number(item.quantity) || 0) * (Number(item.cost) || 0);
+                    },
                     lineTotal(index) {
                         const item = this.$wire.generatedItems[index];
 
-                        return item ? (Number(item.quantity) || 0) * (Number(item.cost) || 0) : 0;
+                        return item ? this.amount(item) : 0;
+                    },
+                    sectionTotal(sectionId) {
+                        return this.$wire.generatedItems.filter((item) => item.section_id === sectionId).reduce((sum, item) => sum + this.amount(item), 0);
                     },
                     total() {
-                        return this.$wire.generatedItems.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.cost) || 0), 0);
+                        return this.$wire.generatedItems.reduce((sum, item) => sum + this.amount(item), 0);
                     },
                     money(amount) {
                         return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

@@ -43,6 +43,12 @@ class EstimateAiDraft extends Model
         return $this->belongsTo(EstimateSection::class, 'section_id')->withoutGlobalScopes();
     }
 
+    /** The whole-estimate run this section's draft was part of; null for a draft made on its own. */
+    public function run(): BelongsTo
+    {
+        return $this->belongsTo(EstimateAiRun::class, 'run_id');
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

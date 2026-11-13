@@ -11,6 +11,7 @@ use Anthropic\Core\Exceptions\APIConnectionException;
 use Anthropic\Core\Exceptions\APIStatusException;
 use Anthropic\Core\Exceptions\AuthenticationException;
 use Anthropic\Core\Exceptions\RateLimitException;
+use App\Exceptions\Estimates\DraftStopped;
 use App\Models\Estimate;
 use App\Models\EstimateAiDraft;
 use App\Models\EstimateAiRule;
@@ -21,6 +22,7 @@ use App\Models\Vendor;
 use App\Services\EstimateAI\DraftCorrections;
 use App\Services\EstimateAI\LineItemStreamParser;
 use App\Services\EstimateAI\SectionRetriever;
+use App\Services\EstimateAI\SectionStreamParser;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -46,6 +48,22 @@ class EstimateAIService
     public const CATALOG_CAP = 500;
 
     public const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+
+    /** Past sections of the same name shown with each section of a whole-estimate draft. */
+    public const NAMESAKES_PER_SECTION = 3;
+
+    /** Past sections shown for the job as a whole, besides each section's namesakes. */
+    public const JOB_EXAMPLES = 4;
+
+    /** The key the model answers with for a section that is not one of the listed ones. */
+    public const NEW_SECTION = 'NEW';
+
+    /** What a room scan measures for one room — and so all that is kept of it. */
+    protected const ROOM_NUMBERS = [
+        'floor_sqft', 'wall_sqft', 'ceiling_height_ft', 'ceiling_height_max_ft', 'perimeter_ft', 'window_casing_lf', 'door_casing_lf',
+        'window_count', 'window_area_sqft', 'door_count',
+        'cabinet_count', 'base_cabinet_lf', 'upper_cabinet_lf', 'tall_cabinet_lf', 'countertop_lf',
+    ];
 
     protected ?Client $client;
 
@@ -175,6 +193,226 @@ class EstimateAIService
     }
 
     /**
+     * Draft a whole estimate in one call, section by section.
+     *
+     * $sections are the sections the draft may fill, each with a short key
+     * and, when it came from a room scan, that room's own measurements. With
+     * $listed they are the estimator's own list: the model fills those and
+     * starts another only for work that belongs to none of them. Without it
+     * they are merely what is on the estimate already, and the model splits
+     * the work into sections itself.
+     *
+     * The reply is read as it streams: $on['section'] when a section opens,
+     * $on['line_item'] for each catalog-resolved item (sized from its
+     * section's own measurements), $on['section_end'] when a section closes
+     * with its final scope, and $on['event'] on every stream event, thinking
+     * included — the caller's heartbeat. Each is called with the section's
+     * header (key, name, scope, on_estimate, measurements) and its position.
+     *
+     * @param  list<array{key: string, name: string, on_estimate?: bool, rooms?: list<array<string, mixed>>}>  $sections
+     * @param  array{section?: callable(array<string, mixed>, int): void, line_item?: callable(array<string, mixed>, int): void, section_end?: callable(array<string, mixed>, int): void, event?: callable(): void}  $on
+     * @param  list<int>  $excludeSectionIds  past sections never shown as examples
+     * @param  bool  $onlyListed  draft the listed sections and no other (a single section drafted again)
+     * @return array{success: bool, reasoning: string, sections: list<array<string, mixed>>, error?: string, meta: array<string, mixed>}
+     */
+    public function generateSections(string $inquiry, array $sections = [], bool $listed = true, ?array $floorplanData = null, int $vendorId = 1, array $on = [], array $excludeSectionIds = [], bool $onlyListed = false): array
+    {
+        $requestId = uniqid('est_ai_');
+        $redactedInquiry = static::redact($inquiry);
+        $floorplanData = static::floorplanMetrics($floorplanData);
+        $plan = static::sectionPlan($sections);
+        $listed = $listed && $plan !== [];
+        // Only the listed sections, nothing new beside them: one section of an
+        // estimate drafted again while the rest stands.
+        $onlyListed = $onlyListed && $listed;
+        $meta = ['request_id' => $requestId, 'model' => $this->model, 'usage' => null, 'stop_reason' => null, 'example_section_ids' => [], 'catalog_count' => 0, 'floorplan' => $floorplanData];
+        $drafted = [];
+
+        Log::channel('estimate_ai')->info('Estimate sections generation started', [
+            'request_id' => $requestId,
+            'vendor_id' => $vendorId,
+            'model' => $this->model,
+            'inquiry' => $redactedInquiry,
+            'redacted' => $redactedInquiry !== $inquiry,
+            'listed' => $listed,
+            'sections' => $plan,
+            'floorplan_data' => $floorplanData,
+        ]);
+
+        try {
+            $availableLineItems = $this->filterRelevantLineItems($this->getAvailableLineItems($vendorId), $redactedInquiry);
+            $examples = $this->getExampleSectionsForPlan($vendorId, $redactedInquiry, $plan, $excludeSectionIds);
+            // A past section can stand under two sections (a sitting room and a living room both find the family rooms).
+            $exampleIds = array_values(array_unique([...array_column(array_merge(...array_values($examples['by_section'])), 'section_id'), ...array_column($examples['job'], 'section_id')]));
+            $rules = $this->activeRules($vendorId);
+            $corrections = $this->pastCorrections($exampleIds, 8);
+            $meta['example_section_ids'] = $exampleIds;
+            $meta['catalog_count'] = $availableLineItems->count();
+
+            $request = $this->buildSectionsRequest($redactedInquiry, $plan, $listed, $floorplanData, $availableLineItems, $examples, $rules, $corrections, $this->companyLine($vendorId), $onlyListed);
+
+            Log::channel('estimate_ai')->debug('Sections request built', [
+                'request_id' => $requestId,
+                'catalog_count' => $availableLineItems->count(),
+                'section_examples' => collect($examples['by_section'])->map(fn (array $rows) => collect($rows)->map(fn ($e) => $e['name'].' #'.$e['section_id'])->all())->all(),
+                'job_examples' => collect($examples['job'])->map(fn ($e) => $e['name'].' ('.$e['score'].')')->all(),
+                'rules' => count($rules),
+                'corrections' => count($corrections),
+            ]);
+
+            // Always streamed: a whole estimate is a long reply, and the rows
+            // are handed over as they close.
+            $completion = $this->complete($request, $this->streamSections($on, $availableLineItems, $plan, $drafted), $on['event'] ?? null);
+            $meta['model'] = $completion['model'];
+            $meta['usage'] = $completion['usage'];
+            $meta['stop_reason'] = $completion['stop_reason'];
+
+            Log::channel('estimate_ai')->debug('Claude response received', [
+                'request_id' => $requestId,
+                'model' => $completion['model'],
+                'stop_reason' => $completion['stop_reason'],
+                'usage' => $completion['usage'],
+                'raw_response' => $completion['text'],
+            ]);
+
+            $data = json_decode($completion['text'], true);
+            $reasoning = is_array($data) ? trim((string) ($data['reasoning'] ?? '')) : '';
+            $error = match (true) {
+                $completion['stop_reason'] === 'refusal' => 'Claude declined to draft this estimate. Reword the description and try again.',
+                $completion['stop_reason'] === 'max_tokens' => 'The draft was cut off before it finished. Draft fewer sections at once, or describe the work more briefly.',
+                ! is_array($data) => 'The draft came back incomplete. Try again.',
+                default => null,
+            };
+
+            Log::channel('estimate_ai')->info('Estimate sections generation completed', [
+                'request_id' => $requestId,
+                'success' => $error === null,
+                'error' => $error,
+                'reasoning' => $reasoning,
+                'sections' => collect($drafted)->map(fn (array $section) => ['key' => $section['key'], 'name' => $section['name'], 'line_items' => count($section['line_items'])])->values()->all(),
+            ]);
+
+            return array_filter([
+                'success' => $error === null,
+                'reasoning' => $reasoning,
+                'sections' => array_values($drafted),
+                'error' => $error,
+                'meta' => $meta,
+            ], fn ($value) => $value !== null);
+        } catch (\Throwable $e) {
+            // The caller stopped the draft from inside a callback: that is its business, not a failure here.
+            if ($e instanceof DraftStopped) {
+                throw $e;
+            }
+
+            Log::channel('estimate_ai')->error('Estimate sections generation failed', [
+                'request_id' => $requestId,
+                'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            Log::error('EstimateAIService error: '.$e->getMessage());
+
+            return ['success' => false, 'reasoning' => '', 'sections' => array_values($drafted), 'error' => $this->friendlyError($e), 'meta' => $meta];
+        }
+    }
+
+    /**
+     * The sections a whole-estimate draft may fill, as the model is told
+     * about them: the caller's key, the name (contact details stripped like
+     * everything else) and the room measurements that are theirs.
+     *
+     * @param  list<array<string, mixed>>  $sections
+     * @return list<array{key: string, name: string, on_estimate: bool, measurements: ?array<string, mixed>, note: ?string}>
+     */
+    public static function sectionPlan(array $sections): array
+    {
+        $plan = [];
+
+        foreach ($sections as $section) {
+            $key = (string) ($section['key'] ?? '');
+            $name = Str::limit(trim(static::redact((string) ($section['name'] ?? ''))), 60, '');
+
+            if ($name === '' || ! preg_match('/^[A-Za-z0-9_-]{1,16}$/', $key) || $key === self::NEW_SECTION || isset($plan[$key])) {
+                continue;
+            }
+
+            $note = Str::limit(trim(static::redact((string) ($section['note'] ?? ''))), 300, '');
+
+            $plan[$key] = [
+                'key' => $key,
+                'name' => $name,
+                'on_estimate' => (bool) ($section['on_estimate'] ?? false),
+                'measurements' => static::sectionMeasurements((array) ($section['rooms'] ?? [])),
+                // What the estimator typed for this section alone ("tile only, keep the cabinets").
+                'note' => $note !== '' ? $note : null,
+            ];
+        }
+
+        return array_values($plan);
+    }
+
+    /**
+     * One scanned room, reduced to what sizes an estimate: its name as
+     * scanned, its dimensions, its numbers and what stands in it.
+     *
+     * @param  array<string, mixed>  $room
+     * @return array<string, mixed>
+     */
+    public static function roomMetrics(array $room): array
+    {
+        $appliances = array_filter(array_map('intval', array_filter((array) ($room['appliances'] ?? []), 'is_numeric')));
+
+        return array_filter([
+            'name' => filled($room['name'] ?? null) ? Str::limit((string) $room['name'], 40, '') : null,
+            'dimensions' => isset($room['dimensions']) ? Str::limit((string) $room['dimensions'], 40, '') : null,
+        ] + array_map(fn ($v) => round((float) $v, 2), array_filter(
+            array_intersect_key($room, array_flip(self::ROOM_NUMBERS)),
+            fn ($v) => is_numeric($v),
+        )) + ['appliances' => $appliances], fn ($v) => $v !== null && $v !== []);
+    }
+
+    /**
+     * The measurements of one estimate section: its room's own, or several
+     * rooms added up when the estimator put them in one section (a living
+     * room scanned in two parts).
+     *
+     * @param  list<array<string, mixed>>  $rooms
+     * @return array<string, mixed>|null
+     */
+    public static function sectionMeasurements(array $rooms): ?array
+    {
+        $rooms = array_values(array_filter(array_map(fn ($room) => is_array($room) ? static::roomMetrics($room) : [], $rooms)));
+
+        if ($rooms === []) {
+            return null;
+        }
+
+        $scannedAs = implode(' + ', array_filter(array_column($rooms, 'name')));
+
+        if (count($rooms) === 1) {
+            return array_filter(['scanned_as' => $scannedAs] + array_diff_key($rooms[0], ['name' => true]), fn ($v) => $v !== '' && $v !== []);
+        }
+
+        $measurements = ['scanned_as' => $scannedAs];
+        foreach (self::ROOM_NUMBERS as $key) {
+            $values = array_filter(array_column($rooms, $key), 'is_numeric');
+            if ($values !== []) {
+                $measurements[$key] = str_starts_with($key, 'ceiling_height') ? max($values) : round(array_sum($values), 2);
+            }
+        }
+
+        $appliances = [];
+        foreach ($rooms as $room) {
+            foreach ($room['appliances'] ?? [] as $kind => $count) {
+                $appliances[$kind] = ($appliances[$kind] ?? 0) + (int) $count;
+            }
+        }
+
+        return array_filter($measurements + ['appliances' => $appliances], fn ($v) => $v !== '' && $v !== []);
+    }
+
+    /**
      * Apply AI-generated line items to an estimate section.
      *
      * @param  array<int, array<string, mixed>>  $generatedItems
@@ -281,13 +519,7 @@ class EstimateAIService
         // appliances stand there — nothing in either identifies the client.
         $rooms = collect((array) ($floorplanData['rooms'] ?? []))
             ->filter(fn ($r) => is_array($r) && filled($r['name'] ?? null))
-            ->map(fn (array $r) => array_filter([
-                'name' => Str::limit((string) $r['name'], 40, ''),
-                'dimensions' => isset($r['dimensions']) ? Str::limit((string) $r['dimensions'], 40, '') : null,
-            ] + array_map(fn ($v) => (float) $v, array_filter(
-                array_intersect_key($r, array_flip(['floor_sqft', 'wall_sqft', 'ceiling_height_ft', 'perimeter_ft', 'window_casing_lf', 'door_casing_lf'])),
-                fn ($v) => is_numeric($v),
-            ))))
+            ->map(fn (array $r) => static::roomMetrics($r))
             ->values()
             ->all();
         if ($rooms !== []) {
@@ -374,16 +606,51 @@ class EstimateAIService
     }
 
     /**
+     * The request for a whole estimate drafted section by section. More room
+     * to answer than a single section gets, and the thinking is summarised
+     * rather than withheld so the stream is never silent for long — the
+     * caller's heartbeat rides on its events.
+     *
+     * @param  list<array<string, mixed>>  $plan
+     * @return array<string, mixed>
+     */
+    protected function buildSectionsRequest(string $inquiry, array $plan, bool $listed, ?array $floorplanData, Collection $lineItems, array $examples, array $rules = [], array $corrections = [], string $companyLine = '', bool $onlyListed = false): array
+    {
+        return [
+            'model' => $this->model,
+            'maxTokens' => 32000,
+            'system' => [
+                ['type' => 'text', 'text' => $this->systemPrompt($companyLine, wholeEstimate: true)],
+            ],
+            'messages' => [
+                ['role' => 'user', 'content' => $this->sectionsPrompt($inquiry, $plan, $listed, $floorplanData, $lineItems, $examples, $rules, $corrections, $onlyListed)],
+            ],
+            'thinking' => ['type' => 'adaptive', 'display' => 'summarized'],
+            'outputConfig' => [
+                'effort' => 'high',
+                'format' => [
+                    'type' => 'json_schema',
+                    'schema' => $this->sectionsOutputSchema($lineItems, $plan, $onlyListed),
+                ],
+            ],
+            'fallbacks' => 'default',
+            'betas' => [self::FALLBACK_BETA],
+        ];
+    }
+
+    /**
      * The one place the SDK is called. Tests replace this with a fake.
      *
      * With $onText the reply is streamed and every text delta is handed to it
-     * as it arrives; the returned text is the same either way.
+     * as it arrives; the returned text is the same either way. $onEvent is
+     * called on every stream event, text or not.
      *
      * @param  array<string, mixed>  $request
      * @param  callable(string): void|null  $onText
+     * @param  callable(): void|null  $onEvent
      * @return array{text: string, stop_reason: ?string, model: string, usage: array<string, mixed>}
      */
-    protected function complete(array $request, ?callable $onText = null): array
+    protected function complete(array $request, ?callable $onText = null, ?callable $onEvent = null): array
     {
         $arguments = [
             'maxTokens' => $request['maxTokens'],
@@ -433,6 +700,10 @@ class EstimateAIService
 
         try {
             foreach ($stream as $event) {
+                if ($onEvent !== null) {
+                    $onEvent();
+                }
+
                 if ($event instanceof BetaRawMessageStartEvent) {
                     $model = $event->message->model ?: $model;
                     $usage['input_tokens'] = $event->message->usage->inputTokens;
@@ -489,6 +760,85 @@ class EstimateAIService
         };
     }
 
+    /**
+     * streamLineItems() for a whole estimate: text deltas in; section
+     * openings, catalog-resolved line items and section closings out, each
+     * handed to the caller's callbacks and gathered into $drafted.
+     *
+     * @param  array<string, callable>  $on
+     * @param  list<array<string, mixed>>  $plan
+     * @param  array<int, array<string, mixed>>  $drafted  filled as the reply arrives, keyed by the section's position
+     * @return \Closure(string): void
+     */
+    protected function streamSections(array $on, Collection $lineItems, array $plan, array &$drafted): \Closure
+    {
+        $parser = new SectionStreamParser;
+        $allowed = $lineItems->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $notify = fn (string $kind, array $payload, int $index) => isset($on[$kind]) ? $on[$kind]($payload, $index) : null;
+
+        return function (string $chunk) use ($parser, $allowed, $plan, $notify, &$drafted): void {
+            foreach ($parser->push($chunk) as $event) {
+                $index = (int) $event['index'];
+
+                if ($event['event'] === 'item') {
+                    if (! isset($drafted[$index])) {
+                        continue;
+                    }
+
+                    $header = array_diff_key($drafted[$index], ['line_items' => true]);
+
+                    // The quantities stay as drafted: Claude sizes each section
+                    // from that section's own measurements, and knows when work
+                    // covers only part of a room. (2026-11-13: forcing floor
+                    // tile to the room's floor turned a ~40 sq.ft. pantry
+                    // allowance into the whole 286 sq.ft. kitchen.)
+                    foreach ($this->normalizeLineItems([$event['item']], $allowed) as $item) {
+                        $drafted[$index]['line_items'][] = $item;
+                        $notify('line_item', $item + ['section' => $header], $index);
+                    }
+
+                    continue;
+                }
+
+                $header = $this->sectionHeader($event, $plan, $index);
+                $opening = ! isset($drafted[$index]);
+                $drafted[$index] = $header + ['line_items' => $drafted[$index]['line_items'] ?? []];
+
+                if ($opening) {
+                    $notify('section', $header, $index);
+                }
+
+                if ($event['event'] === 'section_end') {
+                    $notify('section_end', $header, $index);
+                }
+            }
+        };
+    }
+
+    /**
+     * Which section the model means: a listed one by its key (or, failing
+     * that, by its name), keeping the listed name and measurements; anything
+     * else is a section of the model's own.
+     *
+     * @param  array<string, mixed>  $event
+     * @param  list<array<string, mixed>>  $plan
+     * @return array{key: string, name: string, scope: string, on_estimate: bool, measurements: ?array<string, mixed>}
+     */
+    protected function sectionHeader(array $event, array $plan, int $index): array
+    {
+        $name = Str::limit(trim((string) ($event['name'] ?? '')), 60, '');
+        $scope = Str::limit(trim((string) ($event['scope'] ?? '')), 600);
+
+        $listed = collect($plan)->firstWhere('key', (string) ($event['key'] ?? ''))
+            ?? ($name !== '' ? collect($plan)->first(fn (array $section) => Str::lower($section['name']) === Str::lower($name)) : null);
+
+        if ($listed !== null) {
+            return ['key' => $listed['key'], 'name' => $listed['name'], 'scope' => $scope, 'on_estimate' => (bool) $listed['on_estimate'], 'measurements' => $listed['measurements'] ?? null];
+        }
+
+        return ['key' => self::NEW_SECTION, 'name' => $name !== '' ? $name : 'Section '.($index + 1), 'scope' => $scope, 'on_estimate' => false, 'measurements' => null];
+    }
+
     protected function client(): Client
     {
         if ($this->client) {
@@ -538,11 +888,60 @@ class EstimateAIService
         ];
     }
 
-    protected function systemPrompt(string $companyLine = ''): string
+    /**
+     * JSON schema for a whole-estimate draft: sections, each with its own
+     * line items. A section's key is an enum of the listed sections' keys
+     * plus NEW, so the model cannot point at a section that is not there;
+     * the header comes before the items so each row can be placed as it
+     * streams in.
+     *
+     * @param  list<array<string, mixed>>  $plan
+     */
+    protected function sectionsOutputSchema(Collection $lineItems, array $plan, bool $onlyListed = false): array
+    {
+        $lineItemsSchema = $this->outputSchema($lineItems)['properties']['line_items'];
+
+        return [
+            'type' => 'object',
+            'properties' => [
+                'reasoning' => [
+                    'type' => 'string',
+                    'description' => 'Two to four sentences on the job as a whole: what it is and the main assumptions. The sections say the rest.',
+                ],
+                'sections' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            // No NEW when only the listed sections are being drafted: there is no key to answer with for another.
+                            'key' => ['type' => 'string', 'enum' => $onlyListed ? array_column($plan, 'key') : [...array_column($plan, 'key'), self::NEW_SECTION]],
+                            'name' => ['type' => 'string', 'description' => 'The section name: the listed name for a listed key; for NEW, a short name the way this company names its sections.'],
+                            'scope' => ['type' => 'string', 'description' => 'One or two sentences: what this section covers and what its quantities assume.'],
+                            'line_items' => $lineItemsSchema,
+                        ],
+                        'required' => ['key', 'name', 'scope', 'line_items'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => ['reasoning', 'sections'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    protected function systemPrompt(string $companyLine = '', bool $wholeEstimate = false): string
     {
         $companyLine = $companyLine !== '' ? $companyLine : 'a residential remodeling contractor';
 
-        return "You are the estimator at {$companyLine}. You draft the line items for a new estimate from the company's own price catalog, for a human estimator to review and edit before anything is sent to a client.\n".<<<'PROMPT'
+        return "You are the estimator at {$companyLine}. You draft the line items for a new estimate from the company's own price catalog, for a human estimator to review and edit before anything is sent to a client.\n".($wholeEstimate ? <<<'PROMPT'
+
+This draft covers the whole estimate, not one section. Answer section by section. A section holds the work that happens in that room or scope, sized from that section's own measurements — never from the whole plan's totals — so the client can read what each room costs. Work asked for across the house ("new flooring throughout", "paint everything") goes into each room's section at that room's size, unless this company's past estimates show it estimating that trade as a section of its own. Something the whole job needs once (a dumpster, a permit, floor protection) appears once, in the section where the past estimates put it.
+
+Each section comes with this company's own past sections of the same or a similar name. They are its checklist for that room: when the inquiry asks for new work there ("new kitchen", "remodel the bath", "new wet bar"), carry the items those sections carry for that kind of work — demolition, framing, plumbing and electrical rough-ins, drywall, installation, finishes and the supporting items — sized to this room. An enquiry is usually a few words; "new kitchen" means the kitchen this company normally builds, not one line. Leave out only what the inquiry rules out or what the work in that room clearly does not need (a floor refinish needs no cabinets).
+
+A section may also carry the estimator's own note. It is their word on what that section is to include, written knowing the inquiry: where the two read differently, the note decides for that section.
+
+PROMPT : '').<<<'PROMPT'
 
 How estimates are built here: an estimate is split into sections, one per room or scope ("Kitchen", "Hall Bath", "Basement"). Each section lists catalog items with a quantity in the item's unit — pieces, sq.ft., li.ft., or no_unit for lump sums, which always have quantity 1. Follow the order of construction within a section: demolition, framing, plumbing rough, electrical rough, HVAC, insulation, drywall, tile prep, tile, finish carpentry, fixtures and trim, painting.
 
@@ -574,30 +973,126 @@ PROMPT;
 
     protected function userPrompt(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples, array $rules = [], array $corrections = []): string
     {
-        $prompt = "CUSTOMER INQUIRY (contact details already removed):\n{$inquiry}\n\n";
+        $prompt = "CUSTOMER INQUIRY (contact details already removed):\n{$inquiry}\n\n".$this->rulesBlock($rules);
 
-        if ($rules !== []) {
-            $prompt .= "COMPANY ESTIMATING RULES (written by this company's estimators; follow them):\n";
-            foreach ($rules as $rule) {
-                $prompt .= "- {$rule}\n";
+        if ($floorplanData) {
+            $prompt .= $this->floorplanBlock($floorplanData);
+        }
+
+        return $prompt.$this->catalogBlock($lineItems).$this->examplesBlock($examples).$this->correctionsBlock($corrections);
+    }
+
+    /**
+     * userPrompt() for a whole estimate: the same enquiry, rules, catalog,
+     * examples and corrections, with the sections the draft is to fill —
+     * each with its own room's measurements — in place of one flat scan.
+     *
+     * @param  list<array<string, mixed>>  $plan
+     */
+    /**
+     * @param  list<array<string, mixed>>  $plan
+     * @param  array{by_section: array<string, list<array<string, mixed>>>, job: list<array<string, mixed>>}  $examples
+     */
+    protected function sectionsPrompt(string $inquiry, array $plan, bool $listed, ?array $floorplanData, Collection $lineItems, array $examples, array $rules = [], array $corrections = [], bool $onlyListed = false): string
+    {
+        $measured = collect($plan)->contains(fn (array $section) => ! empty($section['measurements']));
+        $prompt = "CUSTOMER INQUIRY (contact details already removed):\n{$inquiry}\n\n".$this->rulesBlock($rules);
+
+        if ($listed) {
+            $prompt .= "SECTIONS OF THIS ESTIMATE (the estimator's own list; answer with each section's key):\n"
+                ."- Draft every section below that the enquiry gives work for. Leave out a section it gives no work for rather than padding it.\n"
+                .($measured
+                    ? "- A section's measurements come from a scan of that room; size its items from them: floor_sqft sizes flooring and floor tile; wall_sqft sizes paint, drywall and wall tile; perimeter_ft sizes baseboard; window_casing_lf and door_casing_lf size casings; base_cabinet_lf, upper_cabinet_lf and tall_cabinet_lf are the cabinet runs and countertop_lf the counter run, in linear feet; appliances are what stands there now — one hookup or install per unit that is replaced or moved.\n"
+                    : '')
+                ."- Under each section are this company's own past sections of the same or a similar name: that is how it estimates that room. Draft the section the way they were drafted for the work asked for there — see the system prompt.\n"
+                .($onlyListed
+                    ? "- Only what is listed below is being drafted now: the rest of this estimate is drafted already. Draft the work of the inquiry that belongs here, and leave everything that belongs to another room or section out.\n\n"
+                    : '- Use key '.self::NEW_SECTION." with a name of your own only for work that belongs to none of the sections below.\n\n");
+        } else {
+            $prompt .= "SECTIONS OF THIS ESTIMATE:\n"
+                ."- Split the work into sections the way this company's past estimates do — one per room or scope (\"Kitchen\", \"Hall Bath\", \"Painting\"). Give each one key ".self::NEW_SECTION." and a short name.\n"
+                .($plan !== [] ? "- These sections are on the estimate already. Use a section's key to add to it rather than starting a second one for the same room:\n\n" : "\n");
+        }
+
+        foreach ($plan as $section) {
+            $prompt .= "{$section['key']} — {$section['name']}".($section['on_estimate'] ? ' (already on the estimate: add to it)' : '')."\n";
+            if (! empty($section['measurements'])) {
+                $prompt .= json_encode($section['measurements'])."\n";
             }
+
+            if (! empty($section['note'])) {
+                $prompt .= "  The estimator's note for this section: {$section['note']}\n";
+            }
+
+            $namesakes = $examples['by_section'][$section['key']] ?? [];
+            $prompt .= $namesakes === []
+                ? "  (no past section of this name at this company)\n"
+                : "  This company's past \"{$section['name']}\" sections:\n".implode('', array_map(fn (array $example) => '  - '.$this->exampleLine($example)."\n", $namesakes));
             $prompt .= "\n";
         }
 
-        if ($floorplanData) {
-            $prompt .= "FLOORPLAN DATA (measured from a room scan; size quantities from these numbers, per room where rooms are listed):\n"
-                ."- floor_sqft sizes flooring and floor tile; wall_sqft sizes paint, drywall and wall tile; perimeter_ft sizes baseboard.\n"
-                ."- window_casing_lf and door_casing_lf size casings; base_cabinet_lf, upper_cabinet_lf and tall_cabinet_lf are the cabinet runs in linear feet; countertop_lf is the counter run.\n"
-                ."- appliances are what is there now: one hookup or install per unit that is replaced or moved.\n"
-                .(isset($floorplanData['floors'])
-                    ? "- This job has several layouts (floors): the totals are summed across all of them, room names start with their floor, and floors gives each one's own numbers. Size work on one floor from that floor's numbers.\n"
-                    : '')
-                .json_encode($floorplanData, JSON_PRETTY_PRINT)."\n\n";
+        if ($floorplanData && $measured) {
+            // The rooms are with their sections above; here only what they add up to.
+            $prompt .= "WHOLE-PLAN MEASUREMENTS (every scanned room together — only for work that is not tied to one section):\n"
+                .json_encode(array_diff_key($floorplanData, ['rooms' => true]), JSON_PRETTY_PRINT)."\n\n";
+        } elseif ($floorplanData) {
+            $prompt .= $this->floorplanBlock($floorplanData);
         }
 
-        $prompt .= "CATALOG ITEMS AVAILABLE FOR THIS DRAFT (id | name | category / sub-category | unit):\n";
+        $job = $examples['job'] === [] ? '' : "\nOTHER PAST SECTIONS CLOSE TO THIS JOB (for work that is in none of the sections above):\n"
+            .implode('', array_map(fn (array $example) => '- '.$this->exampleLine($example)."\n", $examples['job']));
+
+        return $prompt.$this->catalogBlock($lineItems).$job.$this->correctionsBlock($corrections);
+    }
+
+    /**
+     * One past section on one line: "Kitchen — Smith remodel, Oct 2026: Demo × 1; Floor Tile × 45 sq.ft.; …".
+     *
+     * @param  array<string, mixed>  $example
+     */
+    protected function exampleLine(array $example): string
+    {
+        $items = array_map(function (array $item) {
+            $quantity = rtrim(rtrim(number_format((float) $item['quantity'], 2, '.', ''), '0'), '.');
+
+            return $item['unit_type'] === 'no_unit' ? "{$item['name']} × 1" : "{$item['name']} × {$quantity} {$item['unit_type']}";
+        }, $example['items']);
+
+        return "{$example['name']} — {$example['project']}, {$example['date']}: ".implode('; ', $items);
+    }
+
+    /** @param  list<string>  $rules */
+    protected function rulesBlock(array $rules): string
+    {
+        if ($rules === []) {
+            return '';
+        }
+
+        $block = "COMPANY ESTIMATING RULES (written by this company's estimators; follow them):\n";
+        foreach ($rules as $rule) {
+            $block .= "- {$rule}\n";
+        }
+
+        return $block."\n";
+    }
+
+    protected function floorplanBlock(array $floorplanData): string
+    {
+        return "FLOORPLAN DATA (measured from a room scan; size quantities from these numbers, per room where rooms are listed):\n"
+            ."- floor_sqft sizes flooring and floor tile; wall_sqft sizes paint, drywall and wall tile; perimeter_ft sizes baseboard.\n"
+            ."- window_casing_lf and door_casing_lf size casings; base_cabinet_lf, upper_cabinet_lf and tall_cabinet_lf are the cabinet runs in linear feet; countertop_lf is the counter run.\n"
+            ."- appliances are what is there now: one hookup or install per unit that is replaced or moved.\n"
+            .(isset($floorplanData['floors'])
+                ? "- This job has several layouts (floors): the totals are summed across all of them, room names start with their floor, and floors gives each one's own numbers. Size work on one floor from that floor's numbers.\n"
+                : '')
+            .json_encode($floorplanData, JSON_PRETTY_PRINT)."\n\n";
+    }
+
+    protected function catalogBlock(Collection $lineItems): string
+    {
+        $block = "CATALOG ITEMS AVAILABLE FOR THIS DRAFT (id | name | category / sub-category | unit):\n";
         foreach ($lineItems as $item) {
-            $prompt .= sprintf(
+            $block .= sprintf(
                 "%d | %s | %s / %s | %s\n",
                 $item->id,
                 $item->name,
@@ -607,24 +1102,38 @@ PROMPT;
             );
         }
 
-        if ($examples !== []) {
-            $prompt .= "\nRECENT SECTIONS THE COMPANY ESTIMATED FOR SIMILAR ROOMS (name, then item × quantity unit):\n";
-            foreach ($examples as $example) {
-                $prompt .= "\n{$example['name']} — {$example['project']}, {$example['date']}:\n";
-                foreach ($example['items'] as $item) {
-                    $prompt .= sprintf("  - %s × %s %s\n", $item['name'], rtrim(rtrim(number_format((float) $item['quantity'], 2, '.', ''), '0'), '.'), $item['unit_type']);
-                }
+        return $block;
+    }
+
+    protected function examplesBlock(array $examples): string
+    {
+        if ($examples === []) {
+            return '';
+        }
+
+        $block = "\nRECENT SECTIONS THE COMPANY ESTIMATED FOR SIMILAR ROOMS (name, then item × quantity unit):\n";
+        foreach ($examples as $example) {
+            $block .= "\n{$example['name']} — {$example['project']}, {$example['date']}:\n";
+            foreach ($example['items'] as $item) {
+                $block .= sprintf("  - %s × %s %s\n", $item['name'], rtrim(rtrim(number_format((float) $item['quantity'], 2, '.', ''), '0'), '.'), $item['unit_type']);
             }
         }
 
-        if ($corrections !== []) {
-            $prompt .= "\nWHAT THE ESTIMATORS CHANGED AFTER EARLIER AI DRAFTS OF SIMILAR WORK (do not repeat these mistakes):\n";
-            foreach ($corrections as $correction) {
-                $prompt .= "- {$correction['section']}: asked for \"{$correction['inquiry']}\" — {$correction['summary']}\n";
-            }
+        return $block;
+    }
+
+    protected function correctionsBlock(array $corrections): string
+    {
+        if ($corrections === []) {
+            return '';
         }
 
-        return $prompt;
+        $block = "\nWHAT THE ESTIMATORS CHANGED AFTER EARLIER AI DRAFTS OF SIMILAR WORK (do not repeat these mistakes):\n";
+        foreach ($corrections as $correction) {
+            $block .= "- {$correction['section']}: asked for \"{$correction['inquiry']}\" — {$correction['summary']}\n";
+        }
+
+        return $block;
     }
 
     /**
@@ -695,19 +1204,60 @@ PROMPT;
         $retriever = $this->retriever ?? app(SectionRetriever::class);
 
         return collect($retriever->similar($vendorId, $inquiry, $limit, $excludeSectionIds))
-            ->map(fn (array $row) => [
-                'section_id' => (int) $row['section']->id,
-                'score' => (float) $row['score'],
-                'name' => $row['section']->name,
-                'project' => $row['section']->estimate?->project?->project_name ?? 'past project',
-                'date' => optional($row['section']->created_at)->format('M Y') ?? '',
-                'items' => $row['section']->estimate_line_items
-                    ->map(fn ($item) => ['name' => $item->name, 'quantity' => (float) $item->quantity, 'unit_type' => $item->unit_type])
-                    ->values()
-                    ->all(),
-            ])
+            ->map(fn (array $row) => $this->exampleFrom($row))
             ->values()
             ->all();
+    }
+
+    /**
+     * The examples for a whole-estimate draft: for each section, this
+     * company's own past sections of the same or a similar name — how it
+     * estimates that room — and, for the job as a whole (work the model puts
+     * in a section of its own), the past sections closest to the enquiry.
+     * Each past section is shown once.
+     *
+     * @param  list<array<string, mixed>>  $plan
+     * @param  list<int>  $excludeSectionIds
+     * @return array{by_section: array<string, list<array<string, mixed>>>, job: list<array<string, mixed>>}
+     */
+    protected function getExampleSectionsForPlan(int $vendorId, string $inquiry, array $plan, array $excludeSectionIds = []): array
+    {
+        $retriever = $this->retriever ?? app(SectionRetriever::class);
+        $names = collect($plan)->mapWithKeys(fn (array $section) => [$section['key'] => $section['name']])->all();
+
+        $bySection = collect($names === [] ? [] : $retriever->namesakes($vendorId, $names, $inquiry, self::NAMESAKES_PER_SECTION, $excludeSectionIds))
+            ->map(fn (array $rows) => array_map(fn (array $row) => $this->exampleFrom($row), $rows))
+            ->filter()
+            ->all();
+
+        $shown = collect($bySection)->flatten(1)->pluck('section_id')->all();
+        $job = collect($this->getExampleSections($vendorId, $inquiry, self::JOB_EXAMPLES + count($shown), $excludeSectionIds))
+            ->reject(fn (array $example) => in_array($example['section_id'], $shown, true))
+            ->take(self::JOB_EXAMPLES)
+            ->values()
+            ->all();
+
+        return ['by_section' => $bySection, 'job' => $job];
+    }
+
+    /**
+     * @param  array{section: EstimateSection, score: float}  $row
+     * @return array{section_id: int, score: float, name: string, project: string, date: string, items: list<array{name: string, quantity: float, unit_type: string}>}
+     */
+    protected function exampleFrom(array $row): array
+    {
+        return [
+            'section_id' => (int) $row['section']->id,
+            'score' => (float) $row['score'],
+            'name' => $row['section']->name,
+            // A project is often named for its street ("1463 W Winnetka kitchen"): stripped like the enquiry is.
+            'project' => static::redact((string) ($row['section']->estimate?->project?->project_name ?? 'past project')),
+            'date' => optional($row['section']->created_at)->format('M Y') ?? '',
+            'items' => $row['section']->estimate_line_items
+                ->map(fn ($item) => ['name' => $item->name, 'quantity' => (float) $item->quantity, 'unit_type' => $item->unit_type])
+                ->values()
+                ->all(),
+        ];
     }
 
     protected function applyFloorplanQuantities(array $items, array $floorplanData): array

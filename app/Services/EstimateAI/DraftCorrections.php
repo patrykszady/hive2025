@@ -28,9 +28,19 @@ class DraftCorrections
      */
     public static function between(array $draftedItems, Collection $finalLines, ?\DateTimeInterface $draftedAt = null): array
     {
-        $byRow = collect($draftedItems)->every(fn (array $item) => ! empty($item['estimate_line_item_id']));
+        // Whether the draft knows its rows is asked of the draft as recorded,
+        // before anything is set aside below: a draft whose every line was
+        // combined away still compares row by row, and so finds nothing —
+        // not, by falling through to the catalog comparison, every line in
+        // the section as "added".
+        $byRow = $draftedItems !== [] && collect($draftedItems)->every(fn (array $item) => ! empty($item['estimate_line_item_id']));
 
-        if ($byRow && $draftedItems !== []) {
+        // A drafted line later combined with its likes from other sections
+        // into one line elsewhere (EstimateLineItemCombiner) was not removed
+        // by anyone: it is no correction, and nothing to learn from.
+        $draftedItems = array_values(array_filter($draftedItems, fn (array $item) => empty($item['combined_into'])));
+
+        if ($byRow) {
             $drafted = collect($draftedItems)->keyBy(fn (array $item) => (int) $item['estimate_line_item_id']);
             $final = $finalLines->keyBy('id');
             $kept = $drafted->intersectByKeys($final);
@@ -105,9 +115,31 @@ class DraftCorrections
             return $draft->corrections + ['added' => [], 'removed' => [], 'quantity_changed' => [], 'cost_changed' => [], 'text_edited' => []];
         }
 
-        $lines = EstimateLineItem::query()->where('section_id', $draft->section_id)->orderBy('order')->get();
+        return self::between($draft->drafted_items ?? [], self::linesOf($draft), $draft->created_at);
+    }
 
-        return self::between($draft->drafted_items ?? [], $lines, $draft->created_at);
+    /**
+     * The draft's section as it stands, less the lines that are other
+     * drafted lines combined (EstimateLineItemCombiner): a combined line
+     * landing in a drafted section is nothing the estimator added.
+     *
+     * @return Collection<int, EstimateLineItem>
+     */
+    protected static function linesOf(EstimateAiDraft $draft): Collection
+    {
+        $combined = EstimateAiDraft::query()
+            ->where('estimate_id', $draft->estimate_id)
+            ->pluck('drafted_items')
+            ->flatMap(fn ($items) => array_column((array) $items, 'combined_into'))
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        return EstimateLineItem::query()
+            ->where('section_id', $draft->section_id)
+            ->when($combined !== [], fn ($query) => $query->whereNotIn('id', $combined))
+            ->orderBy('order')
+            ->get();
     }
 
     public static function isEmpty(array $corrections): bool
@@ -154,6 +186,7 @@ class DraftCorrections
 
         EstimateAiDraft::query()->where('estimate_id', $estimateId)->where('status', '!=', EstimateAiDraft::DISCARDED)->each(function (EstimateAiDraft $draft) use (&$count) {
             $lines = EstimateLineItem::query()->where('section_id', $draft->section_id)->orderBy('order')->get();
+            $comparable = self::linesOf($draft);
 
             $draft->forceFill([
                 'final_items' => $lines->map(fn (EstimateLineItem $line) => [
@@ -163,7 +196,7 @@ class DraftCorrections
                     'unit_type' => $line->unit_type,
                     'cost' => (float) $line->cost,
                 ])->values()->all(),
-                'corrections' => self::between($draft->drafted_items ?? [], $lines, $draft->created_at),
+                'corrections' => self::between($draft->drafted_items ?? [], $comparable, $draft->created_at),
                 'finalized_at' => now(),
             ])->save();
 

@@ -2,7 +2,6 @@
 
 use App\Livewire\Estimates\EstimateAIGenerator;
 use App\Models\EstimateLineItem;
-use App\Services\EstimateAIService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
@@ -15,25 +14,17 @@ require_once __DIR__.'/../Support/estimate-ai-fixtures.php';
  * changing one changed every drafted line's quantity).
  */
 it('gives each drafted line its own quantity box and changes only that line', function () {
-    $fx = claudeEstimateFixture();
+    $fx = estimateAdmin(claudeEstimateFixture());
     $c = $fx['catalog'];
-    $fx['user']->vendors()->attach($fx['vendor']->id, ['role_id' => 1, 'is_employed' => 1]);
-    $fx['user']->refresh();
 
-    app()->instance(EstimateAIService::class, new FakeClaudeEstimateService([
-        'text' => json_encode(['reasoning' => 'Hall bath.', 'line_items' => [
-            ['line_item_id' => $c['Floor Tile']->id, 'quantity' => 40],
-            ['line_item_id' => $c['New GFCI Location']->id, 'quantity' => 2],
-            ['line_item_id' => $c['Cement Boards']->id, 'quantity' => 10],
-        ]]),
-        'stop_reason' => 'end_turn',
-    ]));
+    claudeDrafts([['S1', 'Hall Bath', 'Hall bath.', [[$c['Floor Tile'], 40], [$c['New GFCI Location'], 2], [$c['Cement Boards'], 10]]]], 'Hall bath.');
 
-    $component = Livewire::test(EstimateAIGenerator::class, ['estimate' => $fx['estimate']])
-        ->set('sectionId', $fx['section']->id)
-        ->set('inquiry', 'Hall bath: new tile floor and two outlets.');
+    $component = tickSection(
+        Livewire::test(EstimateAIGenerator::class, ['estimate' => $fx['estimate']])->set('inquiry', 'Hall bath: new tile floor and two outlets.'),
+        $fx['section']->id,
+    );
 
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     preg_match_all('/wire:model[^=]*="(generatedItems\.\d+\.quantity)"/', $component->html(), $bindings);
     expect($bindings[1])->toBe(['generatedItems.0.quantity', 'generatedItems.1.quantity', 'generatedItems.2.quantity']);
@@ -53,25 +44,17 @@ it('gives each drafted line its own quantity box and changes only that line', fu
  * and the remove button's line id wins over a stale position.
  */
 it('rebuilds shifted rows after a removal and removes by line id', function () {
-    $fx = claudeEstimateFixture();
+    $fx = estimateAdmin(claudeEstimateFixture());
     $c = $fx['catalog'];
-    $fx['user']->vendors()->attach($fx['vendor']->id, ['role_id' => 1, 'is_employed' => 1]);
-    $fx['user']->refresh();
 
-    app()->instance(EstimateAIService::class, new FakeClaudeEstimateService([
-        'text' => json_encode(['reasoning' => 'Hall bath.', 'line_items' => [
-            ['line_item_id' => $c['Floor Tile']->id, 'quantity' => 40],
-            ['line_item_id' => $c['New GFCI Location']->id, 'quantity' => 2],
-            ['line_item_id' => $c['Cement Boards']->id, 'quantity' => 10],
-        ]]),
-        'stop_reason' => 'end_turn',
-    ]));
+    claudeDrafts([['S1', 'Hall Bath', 'Hall bath.', [[$c['Floor Tile'], 40], [$c['New GFCI Location'], 2], [$c['Cement Boards'], 10]]]], 'Hall bath.');
 
-    $component = Livewire::test(EstimateAIGenerator::class, ['estimate' => $fx['estimate']])
-        ->set('sectionId', $fx['section']->id)
-        ->set('inquiry', 'Hall bath: new tile floor and two outlets.');
+    $component = tickSection(
+        Livewire::test(EstimateAIGenerator::class, ['estimate' => $fx['estimate']])->set('inquiry', 'Hall bath: new tile floor and two outlets.'),
+        $fx['section']->id,
+    );
 
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     [$tile, $gfci, $boards] = array_map('intval', array_column($component->get('generatedItems'), 'id'));
 
@@ -93,24 +76,17 @@ it('rebuilds shifted rows after a removal and removes by line id', function () {
  * saves nothing and gets the rows back as the estimate has them.
  */
 it('treats a whole-list update as a reload, never a save', function () {
-    $fx = claudeEstimateFixture();
+    $fx = estimateAdmin(claudeEstimateFixture());
     $c = $fx['catalog'];
-    $fx['user']->vendors()->attach($fx['vendor']->id, ['role_id' => 1, 'is_employed' => 1]);
-    $fx['user']->refresh();
 
-    app()->instance(EstimateAIService::class, new FakeClaudeEstimateService([
-        'text' => json_encode(['reasoning' => 'Hall bath.', 'line_items' => [
-            ['line_item_id' => $c['Floor Tile']->id, 'quantity' => 40],
-            ['line_item_id' => $c['New GFCI Location']->id, 'quantity' => 2],
-        ]]),
-        'stop_reason' => 'end_turn',
-    ]));
+    claudeDrafts([['S1', 'Hall Bath', 'Hall bath.', [[$c['Floor Tile'], 40], [$c['New GFCI Location'], 2]]]], 'Hall bath.');
 
-    $component = Livewire::test(EstimateAIGenerator::class, ['estimate' => $fx['estimate']])
-        ->set('sectionId', $fx['section']->id)
-        ->set('inquiry', 'Hall bath: new tile floor and two outlets.');
+    $component = tickSection(
+        Livewire::test(EstimateAIGenerator::class, ['estimate' => $fx['estimate']])->set('inquiry', 'Hall bath: new tile floor and two outlets.'),
+        $fx['section']->id,
+    );
 
-    capturingLivewireStream(fn () => $component->call('generate'));
+    $component->call('generate');
 
     $sent = array_map(fn (array $row) => ['quantity' => 999] + $row, $component->get('generatedItems'));
 
