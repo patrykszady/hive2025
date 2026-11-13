@@ -147,12 +147,28 @@ class EstimateAiRunController extends Controller
         return response()->json(['data' => $this->present($found, $followed->fresh(), $request->user())]);
     }
 
+    /**
+     * A quantity and/or — on a no-unit line (Painting, Demo), whose catalog
+     * price is set per job — a price, typed in the review and saved at once.
+     */
     public function updateLine(Request $request, int $estimate, int $run, int $line): JsonResponse
     {
         $found = $this->editableEstimate($estimate);
         $reviewed = $this->reviewableRun($found, $run);
+        $request->validate(['quantity' => ['nullable'], 'cost' => ['nullable', 'numeric', 'min:0', 'max:9999999']]);
 
-        abort_if($this->runs->setQuantity($found, $reviewed, $line, $request->input('quantity')) === null, 404);
+        abort_unless($request->has('quantity') || $request->has('cost'), 422, 'Send a quantity or a price.');
+
+        if ($request->has('quantity')) {
+            abort_if($this->runs->setQuantity($found, $reviewed, $line, $request->input('quantity')) === null, 404);
+        }
+
+        if ($request->has('cost')) {
+            $drafted = $this->runs->draftedLine($found, $reviewed, $line);
+            abort_if($drafted === null, 404);
+            abort_if($drafted->unit_type !== 'no_unit', 422, 'Only a no-unit line\'s price is set here.');
+            $this->runs->setCost($found, $reviewed, $line, $request->input('cost'));
+        }
 
         return response()->json(['data' => $this->present($found, $reviewed, $request->user())]);
     }

@@ -1517,3 +1517,26 @@ it('keeps the note that went to Claude on its section, and shows it in the revie
     expect($fx['section']->fresh()->ai_note)->toBeNull()->and($fx['section']->fresh()->ai_scope)->toBeNull()
         ->and($kitchen->fresh()->ai_note)->toBe('Full new kitchen with an island; Add a pantry wall');
 });
+
+it('shows a no-unit line\'s quantity and price in the review, and saves a price typed there', function () {
+    [$fx, $component] = draftingGenerator();
+    $component->call('generate')->assertSet('showPreview', true);
+
+    $rows = collect($component->get('generatedItems'));
+    $demo = $rows->search(fn (array $row) => $row['name'] === 'Demo Bathroom');
+    $tile = $rows->search(fn (array $row) => $row['name'] === 'Floor Tile');
+
+    // 2026-11-13: Demo, Framing, Drywall Patch and Painting showed no quantity and no price at all.
+    $component->assertSeeHtml('data-lump-sum-price')->assertSeeHtml('aria-label="Quantity of Demo Bathroom"');
+
+    $component->set("generatedItems.{$demo}.cost", '1250')->set("generatedItems.{$demo}.quantity", '2')
+        ->assertSet("generatedItems.{$demo}.cost", 1250.0)
+        ->assertSet("generatedItems.{$demo}.total", 2500.0);
+    $line = EstimateLineItem::find($component->get("generatedItems.{$demo}.id"));
+    expect((float) $line->cost)->toBe(1250.0)->and((float) $line->total)->toBe(2500.0);
+
+    // A line with a unit keeps the catalog price: a price sent for it changes nothing.
+    $component->set("generatedItems.{$tile}.cost", '1')->assertSet("generatedItems.{$tile}.cost", 23.85);
+    expect((float) EstimateLineItem::find($component->get("generatedItems.{$tile}.id"))->cost)->toBe(23.85);
+});
+

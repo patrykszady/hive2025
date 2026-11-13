@@ -818,11 +818,30 @@ class EstimateAIGenerator extends Component
 
         [$index, $field] = array_pad(explode('.', $key, 2), 2, null);
 
-        if ($field !== 'quantity' || ! isset($this->generatedItems[$index])) {
+        if (! in_array($field, ['quantity', 'cost'], true) || ! isset($this->generatedItems[$index])) {
             return;
         }
 
         $this->authorize('update', $this->estimate);
+
+        // A no-unit line's price (Painting, Demo): typed here, saved to the line at once.
+        if ($field === 'cost') {
+            $line = $this->runs()->setCost($this->estimate, $this->run(), $this->generatedItems[$index]['id'] ?? null, $value);
+
+            if ($line === null) {
+                // Not a price set here (a line with a unit, or not this draft's): the rows show what is saved.
+                $this->reloadDraftLines();
+
+                return;
+            }
+
+            // The box shows what was saved: a blank or a negative price reads 0, as the line now does.
+            $this->generatedItems[$index]['cost'] = (float) $line->cost;
+            $this->generatedItems[$index]['total'] = (float) $line->total;
+            $this->refreshEstimate();
+
+            return;
+        }
 
         $line = $this->runs()->setQuantity($this->estimate, $this->run(), $this->generatedItems[$index]['id'] ?? null, $value);
         if ($line === null) {

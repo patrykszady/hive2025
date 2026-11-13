@@ -573,3 +573,24 @@ it('combines the items the rooms share, a line per unit price, and never changes
 
     $this->getJson($fx['url'].'/combine-items')->assertOk()->assertExactJson(['data' => []]);
 });
+
+it('takes a quantity and a price for a no-unit line in the review, and only a quantity for the rest', function () {
+    $fx = appAiEstimate();
+    $run = appAiReviewedRun($fx);
+    $url = $fx['url'].'/ai-runs/'.$run['id'];
+    $demo = collect($run['sections'][0]['lines'])->firstWhere('name', 'Demo Bathroom');
+    $tile = collect($run['sections'][0]['lines'])->firstWhere('name', 'Floor Tile');
+
+    // 2026-11-13: a no-unit line came in at the catalog's one flat price (Painting $40) with no way to change it here.
+    $this->patchJson($url.'/lines/'.$demo['id'], ['quantity' => 2, 'cost' => 1250])->assertOk()
+        ->assertJsonPath('data.sections.0.lines.0.quantity', 2)
+        ->assertJsonPath('data.sections.0.lines.0.cost', 1250)
+        ->assertJsonPath('data.sections.0.lines.0.total', 2500);
+    expect((float) EstimateLineItem::find($demo['id'])->total)->toBe(2500.0);
+
+    $this->patchJson($url.'/lines/'.$tile['id'], ['cost' => 1])->assertStatus(422);
+    $this->patchJson($url.'/lines/'.$demo['id'], ['cost' => -5])->assertStatus(422);
+    $this->patchJson($url.'/lines/'.$demo['id'], [])->assertStatus(422);
+    expect((float) EstimateLineItem::find($tile['id'])->cost)->toBe(23.85);
+});
+

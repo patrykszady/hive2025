@@ -245,6 +245,28 @@ class EstimateDraftRuns
         return $line;
     }
 
+    /**
+     * A no-unit line's price, typed in the review (2026-11-13): the catalog
+     * keeps one flat price for these (Painting $40), but the estimator prices
+     * them per job (past Painting lines: median $2,000). A blank or negative
+     * price counts as nothing. Lines with a unit keep the catalog price here.
+     */
+    public function setCost(Estimate $estimate, ?EstimateAiRun $run, mixed $lineId, mixed $value): ?EstimateLineItem
+    {
+        $line = $this->draftedLine($estimate, $run, $lineId);
+
+        if ($line === null || $line->unit_type !== 'no_unit') {
+            return null;
+        }
+
+        $cost = is_numeric($value) && (float) $value > 0 ? round((float) $value, 2) : 0.0;
+        $line->cost = $cost;
+        $line->total = (float) $line->quantity * $cost;
+        $line->save();
+
+        return $line;
+    }
+
     /** A drafted line never wanted: gone for good, not parked among the restorable lines. */
     public function removeLine(Estimate $estimate, ?EstimateAiRun $run, mixed $lineId): bool
     {

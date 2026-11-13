@@ -11,6 +11,7 @@
     $quantity = is_numeric($item['quantity'] ?? null) && (float) $item['quantity'] > 0 ? (float) $item['quantity'] : 1.0;
     $cost = (float) ($item['cost'] ?? 0);
     $unit = $item['unit_type'] ?? 'no_unit';
+    // No unit: one flat price per line — shown and, in the review, typed like any other (2026-11-13).
     $lumpSum = $unit === 'no_unit';
     $quantityLabel = rtrim(rtrim(number_format($quantity, 2, '.', ''), '0'), '.');
 @endphp
@@ -34,15 +35,21 @@
         </div>
     </flux:table.cell>
     <flux:table.cell class="align-top">
-        @if($lumpSum)
-        @elseif($editable)
-            <flux:input type="number" step="0.1" min="0.1" size="sm" class="w-24" wire:model.live.debounce.500ms="generatedItems.{{ $index }}.quantity" />
+        @if($editable)
+            <flux:input type="number" step="0.1" min="0.1" size="sm" class="w-24" wire:model.live.debounce.500ms="generatedItems.{{ $index }}.quantity" aria-label="Quantity of {{ $item['name'] ?? 'this line' }}" />
         @else
             <flux:input type="number" size="sm" class="w-24" value="{{ $quantityLabel }}" readonly />
         @endif
     </flux:table.cell>
     <flux:table.cell class="align-top">{{ $lumpSum ? '' : $unit }}</flux:table.cell>
-    <flux:table.cell class="align-top">{{ $lumpSum ? '' : money($cost) }}</flux:table.cell>
+    {{-- A no-unit line (Painting, Demo) carries the catalog's one flat price, which the estimator sets per job: its price is typed here (2026-11-13). --}}
+    <flux:table.cell class="align-top">
+        @if($lumpSum && $editable)
+            <flux:input type="number" step="0.01" min="0" size="sm" class="w-28" icon="currency-dollar" wire:model.live.debounce.700ms="generatedItems.{{ $index }}.cost" aria-label="Price of {{ $item['name'] ?? 'this line' }}" data-lump-sum-price />
+        @else
+            {{ money($cost) }}
+        @endif
+    </flux:table.cell>
     <flux:table.cell variant="strong" class="align-top" :x-text="$editable ? 'money(lineTotal('.$index.'))' : null">{{ money($quantity * $cost) }}</flux:table.cell>
     <flux:table.cell class="align-top !pr-6">
         @if($editable)
