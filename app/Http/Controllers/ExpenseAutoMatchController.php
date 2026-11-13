@@ -1742,15 +1742,63 @@ class ExpenseAutoMatchController extends Controller
             }
         }
 
-        // A short PO is too little to guess from: it matches by city or street
-        // above, or not at all.
-        if (mb_strlen(str_replace(' ', '', $po)) < 4) {
+        // The same for a house number written on its own: "949" matches the
+        // one project at a 949 address being worked on at the expense date,
+        // and two or more is ambiguous. With none under way it goes on to
+        // the scoring below, which finds a job at that number that was
+        // active near the date (one finished last month, one sold and about
+        // to start). (2026-11-13: a dump ticket marked "949" stayed on No
+        // Project while the Kitchen at 949 S Elm Ct was the only job under
+        // way at a 949; the short-PO rule below had been stopping every bare
+        // house number since 2026-10-01.)
+        if (preg_match('/^\d{2,6}$/', $po) === 1) {
+            $workingAtNumber = [];
+
+            foreach ($projectCandidates as $candidate) {
+                if ($this->extractLeadingNumber((string) ($candidate['address_variants'][0] ?? '')) !== $po) {
+                    continue;
+                }
+
+                $statusCode = (int) ($this->projectStatusAtDate($candidate['statuses'] ?? [], $expenseDateString)['code'] ?? 0);
+
+                if (in_array($statusCode, [5, 6, 8], true)) {
+                    $workingAtNumber[(int) $candidate['id']] = true;
+                }
+            }
+
+            if (count($workingAtNumber) === 1) {
+                return ['project_id' => array_key_first($workingAtNumber), 'score' => 0.95, 'ambiguous' => false];
+            }
+
+            if (count($workingAtNumber) > 1) {
+                return ['project_id' => array_key_first($workingAtNumber), 'score' => 0.95, 'ambiguous' => true];
+            }
+        }
+
+        // A short PO is too little to guess from: it matches by city, street
+        // or house number above, or not at all. Short is under three
+        // characters for a number — "949" is a house number and goes on to be
+        // scored like any longer one (Patryk, 2026-11-13: "949 should be
+        // found, change min characters to 3") — and under four for anything
+        // with letters in it, which is how "ELM" stopped being matched to a
+        // finished job whose client happened to be called Elm.
+        $compactPo = str_replace(' ', '', $po);
+        $poIsANumber = preg_match('/^\d+$/', $compactPo) === 1;
+
+        if (mb_strlen($compactPo) < ($poIsANumber ? 3 : 4)) {
             return null;
         }
 
         foreach ($projectCandidates as $candidate) {
             // Hard requirement: project must be active near the expense date.
             if (! $this->isActiveWithinWindow($candidate['statuses'] ?? [], $windowStart, $windowEnd)) {
+                continue;
+            }
+
+            // A number on its own is a house number, and only the address's
+            // own will do: scored by likeness, "949" was also 2949 W Main St
+            // and a job named "Unit 949".
+            if ($poIsANumber && $this->extractLeadingNumber((string) ($candidate['address_variants'][0] ?? '')) !== $compactPo) {
                 continue;
             }
 

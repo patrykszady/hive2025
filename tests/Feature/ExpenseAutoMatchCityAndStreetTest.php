@@ -124,6 +124,69 @@ it('never guesses from a short PO that names no street or city under way', funct
         ->and(poMatch_controller()->match('BOB', '2026-09-29', poMatch_elmJobs()))->toBeNull();
 });
 
+it('matches a PO that is only a house number to the one project at that number under way', function () {
+    // The dump ticket of 2026-11-04 marked "949": three older jobs at 949 S Elm Ct are finished, the Kitchen is Active.
+    $jobs = [
+        ...poMatch_elmJobs(),
+        poMatch_project(178, '949 S Elm Ct', 'Basement Bar', 'Palatine', ['Joe Doe'], [[6, '2022-05-11'], [7, '2022-09-01']]),
+        poMatch_project(211, '949 S Elm Ct', 'Mud Room', 'Palatine', ['Joe Doe'], [[6, '2023-10-01'], [7, '2023-12-12']]),
+    ];
+
+    expect(poMatch_controller()->match('949', '2026-11-04', $jobs))->toMatchArray(['project_id' => 381, 'ambiguous' => false]);
+});
+
+it('counts a Scheduled job and a Service Call at that number as under way, and a two-digit number too', function () {
+    $scheduled = poMatch_project(500, '17 N Marcella Rd', 'Basement', 'Arlington Heights', ['Ann Lee'], [[4, '2026-09-01'], [5, '2026-10-20']]);
+    $serviceCall = poMatch_project(147, '949 S Elm Ct', 'Basement', 'Palatine', ['Joe Doe'], [[7, '2021-10-12'], [8, '2026-11-01']]);
+
+    expect(poMatch_controller()->match('17', '2026-11-04', [$scheduled, ...poMatch_elmJobs()])['project_id'] ?? null)->toBe(500)
+        ->and(poMatch_controller()->match('949', '2026-11-04', [$serviceCall])['project_id'] ?? null)->toBe(147);
+});
+
+it('leaves a house number with two jobs under way for a person', function () {
+    $otherStreet = poMatch_project(460, '949 N Oak St', 'Bathroom', 'Mount Prospect', ['Sue Poe'], [[6, '2026-10-01']]);
+
+    expect(poMatch_controller()->match('949', '2026-11-04', [...poMatch_elmJobs(), $otherStreet])['ambiguous'] ?? null)->toBeTrue();
+});
+
+it('finds a lone house number at a job that was active near the date, when none is under way', function () {
+    $finishedLastMonth = poMatch_project(381, '949 S Elm Ct', 'Kitchen', 'Palatine', ['Joe Doe'], [[6, '2026-09-08'], [7, '2026-10-15']]);
+    $soldNotStarted = poMatch_project(603, '949 S Elm Ct', 'Attic', 'Palatine', ['Joe Doe'], [[2, '2026-09-10'], [3, '2026-10-20']]);
+    $controller = poMatch_controller();
+
+    expect($controller->match('949', '2026-11-04', [$finishedLastMonth])['project_id'] ?? null)->toBe(381)
+        ->and($controller->match('949', '2026-11-04', [$soldNotStarted])['project_id'] ?? null)->toBe(603);
+});
+
+it('matches a lone house number digit for digit, never by likeness, and never to a job long finished', function () {
+    $finishedYearsAgo = [poMatch_project(147, '949 S Elm Ct', 'Basement', 'Palatine', ['Joe Doe'], [[6, '2021-06-01'], [7, '2021-10-12']])];
+    $longerNumber = [poMatch_project(600, '2949 W Main St', 'Bath', 'Palatine', ['Al Poe'], [[6, '2026-10-01']])];
+    $numberInTheName = [poMatch_project(601, '12 Oak St', 'Unit 949 Bath', 'Palatine', ['Al Poe'], [[6, '2026-10-01']])];
+    $controller = poMatch_controller();
+
+    expect($controller->match('949', '2026-11-04', $finishedYearsAgo))->toBeNull('the job at 949 was finished years ago')
+        ->and($controller->match('949', '2026-11-04', $longerNumber))->toBeNull('2949 is another house')
+        ->and($controller->match('949', '2026-11-04', $numberInTheName))->toBeNull('a number in a job\'s name is not its address')
+        ->and($controller->match('948', '2026-11-04', poMatch_elmJobs()))->toBeNull()
+        ->and($controller->match('9490', '2026-11-04', poMatch_elmJobs()))->toBeNull('a longer number is another address, or an order number')
+        ->and($controller->match('1333827', '2026-11-04', poMatch_elmJobs()))->toBeNull();
+});
+
+it('takes three digits as enough for a house number, two only for a job under way, and still four letters for a word', function () {
+    $finishedLastMonth = [poMatch_project(500, '17 N Marcella Rd', 'Basement', 'Arlington Heights', ['Ann Lee'], [[6, '2026-09-01'], [7, '2026-10-15']])];
+    $clientNamedElm = [poMatch_project(147, '949 S Elm Ct', 'Basement', 'Palatine', ['Elm Smith'], [[7, '2026-09-01']])];
+    $controller = poMatch_controller();
+
+    expect($controller->match('17', '2026-11-04', $finishedLastMonth))->toBeNull('two digits never go on to scoring')
+        ->and($controller->match('ELM', '2026-09-29', $clientNamedElm))->toBeNull('three letters match a street or a city under way, or nothing')
+        ->and($controller->match('949', '2026-09-29', $clientNamedElm)['project_id'] ?? null)->toBe(147);
+});
+
+it('leaves a house number of four digits or more to the scoring it always had when no job at it is under way', function () {
+    // 1801 Elm St was sold, not yet under way: no job-under-way match, and the older scoring still finds the address.
+    expect(poMatch_controller()->match('1801', '2026-11-04', poMatch_elmJobs())['project_id'] ?? null)->toBe(451);
+});
+
 it('reads the street past a spelled-out direction', function () {
     expect(poMatch_controller()->match('harvey', '2026-10-01', [poMatch_brodsonNorthbrook(), poMatch_frombergOakPark()])['project_id'] ?? null)->toBe(399);
 });
