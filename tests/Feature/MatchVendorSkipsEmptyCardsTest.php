@@ -221,3 +221,30 @@ it('says there is nothing to save, and runs nothing, when every card was left em
         ->and((int) Expense::withoutGlobalScopes()->find($expense->id)->vendor_id)->toBe(0, 'no sweep ran')
         ->and(VendorTransaction::query()->count())->toBe(1);
 })->with(['store_expense_vendors', 'store']);
+
+it('saves a receipt card while a bank-charge card holds only its prefilled Match As, and the other way round', function () {
+    ['account' => $account, 'company' => $company, 'user' => $user] = processorFixtureCompany();
+    Gate::before(fn ($actor, $ability) => $actor->is($user) ? true : null);
+    test()->actingAs($user);
+    $las = processorFixtureRetailVendor('Las Hardwoods');
+    $expense = Expense::withoutGlobalScopes()->create(['amount' => -454.24, 'date' => '2026-10-21', 'vendor_id' => 0, 'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $user->id]);
+    ExpenseReceipts::create(['expense_id' => $expense->id, 'receipt_filename' => 'r.pdf', 'receipt_html' => '<div></div>', 'receipt_items' => ['items' => [], 'total' => '454.24', 'merchant_name' => 'MAS HARDWOODS, INC.']]);
+
+    // As on the page: a processor card filled in by the prefill, nothing chosen.
+    $receiptSave = new MatchVendor();
+    $receiptSave->match_merchant_names = [5 => ['match_desc' => 'DATAFORSE']];
+    $receiptSave->match_expense_merchant_names = [0 => ['match_desc' => 'MAS HARDWOODS, INC.', 'vendor_id' => (string) $las->id]];
+
+    expect(skipCardsSave($receiptSave, 'store_expense_vendors'))->toBe([])
+        ->and((int) Expense::withoutGlobalScopes()->find($expense->id)->vendor_id)->toBe($las->id);
+
+    // And a half-filled receipt card does not stop a bank-charge save.
+    $charges = skipCardsThreeCharges();
+    $microsoft = processorFixtureRetailVendor('Microsoft');
+    $chargeSave = new MatchVendor();
+    $chargeSave->match_merchant_names = [1 => ['match_desc' => 'E0100KW0UY', 'vendor_id' => (string) $microsoft->id]];
+    $chargeSave->match_expense_merchant_names = [0 => ['match_desc' => 'SOMETHING', 'vendor_id' => '']];
+
+    expect(skipCardsSave($chargeSave))->toBe([])
+        ->and($charges['microsoft']->refresh()->vendor_id)->toBe($microsoft->id);
+});

@@ -74,6 +74,23 @@ class MatchVendor extends Component
         ];
     }
 
+    /**
+     * The rules of one of the two forms only: "match_merchant_names" (the
+     * bank charges) or "match_expense_merchant_names" (the receipts).
+     *
+     * Each save checks its own cards. A receipt save used to validate the
+     * transaction cards too, so a processor card holding only its prefilled
+     * "Match As" (no vendor) failed it, and the receipt was not saved with
+     * the error shown on that other card, out of sight (Patryk, 2026-11-13:
+     * "Sync Expenses & Vendors … still clicking it does nothing").
+     *
+     * @return array<string, string>
+     */
+    protected function rulesFor(string $form): array
+    {
+        return array_filter($this->rules(), fn (string $field): bool => str_starts_with($field, $form.'.'), ARRAY_FILTER_USE_KEY);
+    }
+
     /** @return array<string, string> */
     protected function messages(): array
     {
@@ -340,7 +357,7 @@ class MatchVendor extends Component
             return;
         }
 
-        $this->validate();
+        $this->validate($this->rulesFor('match_expense_merchant_names'), $this->messages());
 
         // A receipt names no bank descriptor, so only the curated list can
         // tell a processor-only match text; the rule written here feeds
@@ -444,7 +461,7 @@ class MatchVendor extends Component
      */
     protected function validatedCardIdentities(): array
     {
-        $this->validate();
+        $this->validate($this->rulesFor('match_merchant_names'), $this->messages());
 
         $identities = [];
         $refusals = [];
