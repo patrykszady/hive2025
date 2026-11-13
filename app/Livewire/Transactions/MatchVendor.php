@@ -13,6 +13,8 @@ use App\Services\Transactions\UnmatchedTransactionCards;
 use App\Services\VendorSuggestionService;
 use App\Support\Transactions\MerchantIdentity;
 use App\Support\Transactions\PaymentProcessors;
+use App\Support\Transactions\MatchRuleDuplicates;
+use App\Support\Transactions\MatchTextReach;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
@@ -331,6 +333,13 @@ class MatchVendor extends Component
     public function store_expense_vendors()
     {
         $this->match_expense_merchant_names = $this->rowsInPlay($this->match_expense_merchant_names);
+
+        if ($this->match_expense_merchant_names === []) {
+            $this->nothingToSave();
+
+            return;
+        }
+
         $this->validate();
 
         // A receipt names no bank descriptor, so only the curated list can
@@ -340,6 +349,19 @@ class MatchVendor extends Component
         foreach ($this->match_expense_merchant_names as $key => $vendor_match) {
             if (PaymentProcessors::isProcessorOnly((string) $vendor_match['match_desc'])) {
                 $refusals["match_expense_merchant_names.{$key}.match_desc"] = PaymentProcessors::refusalMessage((string) $vendor_match['match_desc']);
+
+                continue;
+            }
+
+            // No second vendor of a name already on file, and no rule that
+            // gives this text to a different vendor than the one it has. The
+            // same rule for the same vendor is simply not written twice.
+            if ($vendor_match['vendor_id'] === 'NEW') {
+                if (($refusal = MatchRuleDuplicates::newVendorRefusal((string) $vendor_match['match_desc'])) !== null) {
+                    $refusals["match_expense_merchant_names.{$key}.vendor_id"] = $refusal;
+                }
+            } elseif (($existing = MatchRuleDuplicates::existing((string) $vendor_match['match_desc'])->first()) !== null && (int) $existing->vendor_id !== (int) $vendor_match['vendor_id']) {
+                $refusals["match_expense_merchant_names.{$key}.match_desc"] = MatchRuleDuplicates::refusal((string) $vendor_match['match_desc'], (int) $vendor_match['vendor_id']);
             }
         }
         if ($refusals !== []) {
@@ -361,13 +383,15 @@ class MatchVendor extends Component
             } else {
                 $vendor_id = $vendor_match['vendor_id'];
 
-                VendorTransaction::create([
-                    'vendor_id' => $vendor_id,
-                    'deposit_check' => null,
-                    'desc' => $vendor_match['match_desc'],
-                    'plaid_inst_id' => null,
-                    'options' => json_encode('/i'),
-                ]);
+                if (MatchRuleDuplicates::existing((string) $vendor_match['match_desc'])->isEmpty()) {
+                    VendorTransaction::create([
+                        'vendor_id' => $vendor_id,
+                        'deposit_check' => null,
+                        'desc' => $vendor_match['match_desc'],
+                        'plaid_inst_id' => null,
+                        'options' => json_encode('/i'),
+                    ]);
+                }
             }
 
             $this->linkVendorToCompany($vendor_id);
@@ -384,6 +408,23 @@ class MatchVendor extends Component
             variant: 'success',
             heading: $saved === 1 ? 'Expense vendor saved.' : $saved.' expense vendors saved.',
             text: '',
+        );
+    }
+
+    /**
+     * A save with no card filled in said nothing at all (Patryk, 2026-11-13:
+     * "clicking 'sync expenses & vendors' does nothing"): cards left empty
+     * are left out on purpose, so with every card empty there is nothing to
+     * save — say so instead of quietly reporting "0 saved".
+     */
+    protected function nothingToSave(): void
+    {
+        Flux::toast(
+            duration: 6000,
+            position: 'top right',
+            variant: 'warning',
+            heading: 'Nothing to save yet.',
+            text: 'Fill in Match As and pick a Vendor on the cards you want to save; cards left empty stay for later.',
         );
     }
 
@@ -407,11 +448,30 @@ class MatchVendor extends Component
 
         $identities = [];
         $refusals = [];
+        $seenRules = [];
         foreach ($this->match_merchant_names as $key => $vendor_match) {
-            $identities[$key] = MerchantIdentity::forDescriptor((string) $this->merchantCards->keys()->get($key, ''));
+            $descriptor = (string) $this->merchantCards->keys()->get($key, '');
+            $identities[$key] = MerchantIdentity::forDescriptor($descriptor);
             $vendorId = $vendor_match['vendor_id'];
             if (($vendorId === 'NEW' || is_numeric($vendorId)) && ($refusal = $identities[$key]->refusal((string) $vendor_match['match_desc'])) !== null) {
                 $refusals["match_merchant_names.{$key}.match_desc"] = $refusal;
+
+                continue;
+            }
+
+            // A rule is tried on the bank's own text and on Plaid's name for
+            // the charge: one that reaches neither on the card it is saved
+            // from matches nothing and leaves the card where it is. A NEW
+            // vendor is found by its name, not a rule.
+            $names = $this->merchantCards->values()->get($key, collect())->pluck('plaid_merchant_name')->all();
+            if ($vendorId !== 'NEW' && ($refusal = MatchTextReach::refusal($descriptor, (string) $vendor_match['match_desc'], $vendor_match['options'] ?? null, ! is_numeric($vendorId), $names)) !== null) {
+                $refusals["match_merchant_names.{$key}.match_desc"] = $refusal;
+
+                continue;
+            }
+
+            if (($refusal = $this->duplicateRefusal($key, $vendor_match, $identities[$key], $seenRules)) !== null) {
+                $refusals[$refusal['field']] = $refusal['message'];
             }
         }
         if ($refusals !== []) {
@@ -419,6 +479,58 @@ class MatchVendor extends Component
         }
 
         return $identities;
+    }
+
+    /**
+     * Why this card's save would duplicate what is on file, or null
+     * (MatchRuleDuplicates): a rule for the same text, bank and sign — on
+     * file or on another card of this same save — or a NEW vendor whose name
+     * a vendor already has.
+     *
+     * @param  array<string, mixed>  $vendor_match
+     * @param  array<string, true>  $seenRules  rule keys of the cards before this one, filled as it goes
+     * @return array{field: string, message: string}|null
+     */
+    protected function duplicateRefusal(int|string $key, array $vendor_match, MerchantIdentity $identity, array &$seenRules): ?array
+    {
+        $matchDesc = trim((string) $vendor_match['match_desc']);
+        $vendorId = $vendor_match['vendor_id'];
+        $field = "match_merchant_names.{$key}.match_desc";
+
+        if ($vendorId === 'NEW') {
+            $name = $identity->hasProcessor() ? $identity->vendorNameFor($matchDesc) : $matchDesc;
+
+            if (($refusal = MatchRuleDuplicates::newVendorRefusal($name)) !== null) {
+                return ['field' => "match_merchant_names.{$key}.vendor_id", 'message' => $refusal];
+            }
+
+            // Behind a processor a NEW vendor gets a rule of its own text.
+            if (! $identity->hasProcessor()) {
+                return null;
+            }
+        }
+
+        $depositCheck = match ($vendorId) {
+            'DEPOSIT' => 1,
+            'CHECK' => 2,
+            'TRANSFER' => 3,
+            'CASH' => 4,
+            default => null,
+        };
+        $institutionId = isset($vendor_match['bank_specific'])
+            ? $this->merchantCards->values()->get($key)?->first()?->bank_account?->bank?->plaid_ins_id
+            : null;
+        $amountSign = filled($vendor_match['amount_sign'] ?? null) ? (int) $vendor_match['amount_sign'] : null;
+
+        $ruleKey = MatchRuleDuplicates::normalize($matchDesc).'|'.$institutionId.'|'.$amountSign;
+        if (isset($seenRules[$ruleKey])) {
+            return ['field' => $field, 'message' => 'Another card in this save already matches "'.$matchDesc.'". Keep it on one card.'];
+        }
+        $seenRules[$ruleKey] = true;
+
+        $refusal = MatchRuleDuplicates::refusal($matchDesc, is_numeric($vendorId) ? (int) $vendorId : null, $depositCheck, $institutionId, $amountSign);
+
+        return $refusal === null ? null : ['field' => $field, 'message' => $refusal];
     }
 
     public function store()
@@ -429,6 +541,13 @@ class MatchVendor extends Component
         $submitted = $this->match_merchant_names;
         $prefills = array_map(fn (array $card): ?string => $card['match_desc'], $this->processorCards);
         $this->match_merchant_names = $this->rowsInPlay($submitted, $prefills);
+
+        if ($this->match_merchant_names === []) {
+            $this->match_merchant_names = $submitted;
+            $this->nothingToSave();
+
+            return;
+        }
 
         try {
             $identities = $this->validatedCardIdentities();

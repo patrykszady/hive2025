@@ -3,6 +3,7 @@
 namespace App\Services\Transactions;
 
 use App\Models\VendorTransaction;
+use App\Support\Transactions\MatchRuleDuplicates;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 /**
@@ -86,23 +87,12 @@ class VendorTransactionRuleService
      */
     public function exists(array $payload, ?int $ignoreId = null): bool
     {
-        return VendorTransaction::query()
-            ->when($ignoreId !== null, fn ($query) => $query->where('id', '!=', $ignoreId))
-            ->where('desc', $payload['desc'])
-            ->where('options', $payload['options'])
-            ->where(fn ($query) => $payload['vendor_id'] === null
-                ? $query->whereNull('vendor_id')
-                : $query->where('vendor_id', $payload['vendor_id']))
-            ->where(fn ($query) => $payload['deposit_check'] === null
-                ? $query->whereNull('deposit_check')
-                : $query->where('deposit_check', $payload['deposit_check']))
-            ->where(fn ($query) => $payload['amount_sign'] === null
-                ? $query->whereNull('amount_sign')
-                : $query->where('amount_sign', $payload['amount_sign']))
-            ->where(fn ($query) => $payload['plaid_inst_id'] === null
-                ? $query->whereNull('plaid_inst_id')
-                : $query->where('plaid_inst_id', $payload['plaid_inst_id']))
-            ->exists();
+        // The same text read as a person reads it (case, spacing and "\*"
+        // aside), for the same bank and sign, is the same rule whichever
+        // vendor or code it points at (MatchRuleDuplicates): a second one
+        // either repeats the first or fights it.
+        return MatchRuleDuplicates::existing($payload['desc'], $payload['plaid_inst_id'], $payload['amount_sign'])
+            ->contains(fn (VendorTransaction $rule): bool => $ignoreId === null || (int) $rule->id !== $ignoreId);
     }
 
     /**

@@ -1046,9 +1046,7 @@ class TransactionController extends Controller
                 if (($alias->amount_sign === 1 && $transaction->amount <= 0) || ($alias->amount_sign === 2 && $transaction->amount >= 0)) {
                     return false;
                 }
-                $flags = json_decode($alias->options);
-
-                return @preg_match('/'.$alias->desc.$flags, $description) === 1;
+                return $alias->matchesCharge($description, $transaction->plaid_merchant_name);
             });
 
             if ($matchingRules->isEmpty() || ! $matchingRules->every(fn (VendorTransaction $alias) => $identity->isProcessorOnlyRule($alias->desc))) {
@@ -1273,9 +1271,7 @@ class TransactionController extends Controller
                 if ($alias->amount_sign === 2 && $transaction->amount >= 0) {
                     continue;
                 }
-                $flags = json_decode($alias->options);
-                $matched = @preg_match('/'.$alias->desc.$flags, $desc, $aliasMatches, PREG_UNMATCHED_AS_NULL);
-                if ($matched === 1 && ! empty($aliasMatches)) {
+                if ($alias->matchesCharge($desc, $transaction->plaid_merchant_name)) {
                     return true;
                 }
             }
@@ -1383,25 +1379,38 @@ class TransactionController extends Controller
             ->get()
             ->keyBy('id');
 
+        // Rules that match Plaid's clean merchant name, worked out once per
+        // name. Used only for a charge whose bank text no rule matches: "Match
+        // As" is often typed as the name Plaid shows ("Frontier
+        // Communications" for "… FRONTIERMYSB3L …"), and until 2026-11-13
+        // such a rule matched nothing at all.
+        $aliasesByName = [];
+        $aliasesForName = function (?string $name) use (&$aliasesByName, $vendor_transactions) {
+            $name = trim((string) $name);
+
+            if ($name === '') {
+                return collect();
+            }
+
+            return $aliasesByName[$name] ??= $vendor_transactions->filter(fn (VendorTransaction $rule): bool => $rule->matchesText($name));
+        };
+
         foreach ($transactions as $merchant_desc => $plaid_name_transactions) {
             // Aliases whose regex matches this descriptor, kept shortest-desc
             // first: the last (longest) candidate wins, matching the old
             // behavior where later, longer aliases overwrote earlier ones.
-            $matchingAliases = $vendor_transactions->filter(function ($vendor_transaction) use ($merchant_desc) {
-                //decode json on VendorTrasaction Model
-                $preg = json_decode($vendor_transaction->options);
-                $matched = @preg_match('/'.$vendor_transaction->desc.$preg, $merchant_desc, $matches, PREG_UNMATCHED_AS_NULL);
-
-                return $matched === 1 && ! empty($matches);
-            });
-
-            if ($matchingAliases->isEmpty()) {
-                continue;
-            }
+            $matchingAliases = $vendor_transactions->filter(fn (VendorTransaction $vendor_transaction): bool => $vendor_transaction->matchesText((string) $merchant_desc));
 
             foreach ($plaid_name_transactions as $transaction) {
+                // The bank text first; only when no rule matches it, Plaid's name.
+                $aliasesForCharge = $matchingAliases->isNotEmpty() ? $matchingAliases : $aliasesForName($transaction->plaid_merchant_name);
+
+                if ($aliasesForCharge->isEmpty()) {
+                    continue;
+                }
+
                 $identity = MerchantIdentity::of($transaction);
-                $candidates = $matchingAliases->filter(function ($vendor_transaction) use ($transaction, $aliasVendors, $identity) {
+                $candidates = $aliasesForCharge->filter(function ($vendor_transaction) use ($transaction, $aliasVendors, $identity) {
                     // A rule naming only a payment processor ("PADDLE.NET") may
                     // hold a bare processor charge, never one that names the
                     // merchant the processor billed for ("PADDLE.NET* DATAFORSEO").

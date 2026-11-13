@@ -195,3 +195,29 @@ it('leaves a receipt card with nothing chosen out of the receipt save too', func
         'match_expense_merchant_names.0.vendor_id' => ['Pick a vendor, or clear Match As to leave this card for later.'],
     ]);
 });
+
+it('says there is nothing to save, and runs nothing, when every card was left empty', function (string $form) {
+    // A receipt the sweep would otherwise file: the save must not reach it.
+    ['account' => $account, 'company' => $company, 'user' => $user] = processorFixtureCompany();
+    Gate::before(fn ($actor, $ability) => $actor->is($user) ? true : null);
+    test()->actingAs($user);
+    $expense = Expense::withoutGlobalScopes()->create(['amount' => -9.99, 'date' => '2026-10-01', 'vendor_id' => 0, 'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $user->id]);
+    ExpenseReceipts::create(['expense_id' => $expense->id, 'receipt_filename' => 'r.pdf', 'receipt_html' => '<div></div>', 'receipt_items' => ['items' => [], 'total' => '9.99', 'merchant_name' => 'Known Shop']]);
+    VendorTransaction::create(['vendor_id' => processorFixtureRetailVendor('Known Shop')->id, 'desc' => 'Known Shop', 'options' => json_encode('/i')]);
+
+    $component = new MatchVendor();
+    $component->match_merchant_names = [0 => ['match_desc' => '', 'vendor_id' => '']];
+    $component->match_expense_merchant_names = [0 => ['match_desc' => '', 'vendor_id' => '']];
+
+    $toast = null;
+    try {
+        $component->{$form}();
+    } catch (\Throwable $e) {
+        // Flux::toast() throws outside a Livewire request — after the decision under test.
+        $toast = $e;
+    }
+
+    expect($toast)->not->toBeNull('the person is told')
+        ->and((int) Expense::withoutGlobalScopes()->find($expense->id)->vendor_id)->toBe(0, 'no sweep ran')
+        ->and(VendorTransaction::query()->count())->toBe(1);
+})->with(['store_expense_vendors', 'store']);

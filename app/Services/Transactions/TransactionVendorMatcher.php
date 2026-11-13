@@ -7,6 +7,8 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Support\Transactions\MatchRuleDuplicates;
+use App\Support\Transactions\MatchTextReach;
 use App\Support\Transactions\MerchantIdentity;
 use App\Support\Transactions\PaymentProcessors;
 use Illuminate\Validation\ValidationException;
@@ -58,6 +60,36 @@ class TransactionVendorMatcher
         // vendor, so only a vendor match is held to the processor rule.
         if (($vendorId === 'NEW' || is_numeric($vendorId)) && ($refusal = $identity->refusal($matchDesc)) !== null) {
             throw ValidationException::withMessages(['match_desc' => $refusal]);
+        }
+
+        // A rule is tried on the bank's own text and on Plaid's name for the
+        // charge: one that reaches neither on the card it is saved from would
+        // match nothing (MatchTextReach).
+        $names = Transaction::transactionsSinVendor()->where('plaid_merchant_description', $descriptor)->pluck('plaid_merchant_name')->all();
+        if ($vendorId !== 'NEW' && filled($vendorId) && ($refusal = MatchTextReach::refusal($descriptor, $matchDesc, null, ! is_numeric($vendorId), $names)) !== null) {
+            throw ValidationException::withMessages(['match_desc' => $refusal]);
+        }
+
+        // One rule per text, bank and sign, and one vendor per name
+        // (MatchRuleDuplicates) — as the web form refuses them.
+        if ($vendorId === 'NEW') {
+            $newName = $identity->hasProcessor() ? $identity->vendorNameFor($matchDesc) : $matchDesc;
+            if (($refusal = MatchRuleDuplicates::newVendorRefusal($newName)) !== null) {
+                throw ValidationException::withMessages(['vendor_id' => $refusal]);
+            }
+        }
+        if (($vendorId !== 'NEW' || $identity->hasProcessor()) && filled($vendorId)) {
+            $depositCheck = ['DEPOSIT' => 1, 'CHECK' => 2, 'TRANSFER' => 3, 'CASH' => 4][$vendorId] ?? null;
+            $institution = ! empty($input['bank_specific'])
+                ? Transaction::transactionsSinVendor()->where('plaid_merchant_description', $descriptor)
+                    ->with(['bank_account' => fn ($query) => $query->withoutGlobalScopes()->with(['bank' => fn ($query) => $query->withoutGlobalScopes()])])
+                    ->first()?->bank_account?->bank?->plaid_ins_id
+                : null;
+            $sign = filled($input['amount_sign'] ?? null) ? (int) $input['amount_sign'] : null;
+
+            if (($refusal = MatchRuleDuplicates::refusal($matchDesc, is_numeric($vendorId) ? (int) $vendorId : null, $depositCheck, $institution, $sign)) !== null) {
+                throw ValidationException::withMessages(['match_desc' => $refusal]);
+            }
         }
 
         if ($vendorId === 'NEW') {
@@ -132,6 +164,14 @@ class TransactionVendorMatcher
         }
 
         if (($input['vendor_id'] ?? null) === 'NEW') {
+            if (($refusal = MatchRuleDuplicates::newVendorRefusal($matchDesc)) !== null) {
+                throw ValidationException::withMessages(['vendor_id' => $refusal]);
+            }
+        } elseif (($existing = MatchRuleDuplicates::existing($matchDesc)->first()) !== null && (int) $existing->vendor_id !== (int) $input['vendor_id']) {
+            throw ValidationException::withMessages(['match_desc' => MatchRuleDuplicates::refusal($matchDesc, (int) $input['vendor_id'])]);
+        }
+
+        if (($input['vendor_id'] ?? null) === 'NEW') {
             $vendor = Vendor::create([
                 'business_type' => 'Retail',
                 'business_name' => $matchDesc,
@@ -144,13 +184,15 @@ class TransactionVendorMatcher
         } else {
             $vendorId = (int) $input['vendor_id'];
 
-            VendorTransaction::create([
-                'vendor_id' => $vendorId,
-                'deposit_check' => null,
-                'desc' => $matchDesc,
-                'plaid_inst_id' => null,
-                'options' => json_encode('/i'),
-            ]);
+            if (MatchRuleDuplicates::existing($matchDesc)->isEmpty()) {
+                VendorTransaction::create([
+                    'vendor_id' => $vendorId,
+                    'deposit_check' => null,
+                    'desc' => $matchDesc,
+                    'plaid_inst_id' => null,
+                    'options' => json_encode('/i'),
+                ]);
+            }
 
             $vendor = Vendor::withoutGlobalScopes()->find($vendorId);
         }
@@ -299,6 +341,11 @@ class TransactionVendorMatcher
     /** The plain vendor rule every path here writes, "*" escaped as the web form does. */
     private function writeRule(int $vendorId, string $matchDesc): void
     {
+        // Never the same rule twice (MatchRuleDuplicates).
+        if (MatchRuleDuplicates::existing($matchDesc)->contains(fn (VendorTransaction $rule): bool => (int) $rule->vendor_id === $vendorId)) {
+            return;
+        }
+
         VendorTransaction::create([
             'vendor_id' => $vendorId,
             'deposit_check' => null,
