@@ -38,6 +38,9 @@ class UnmatchedTransactionCards
                 'plaid_merchant_description',
                 'plaid_merchant_name',
                 'bank_account_id',
+                // The card member on a shared card account (Capital One
+                // ••4060's cards ••0616, ••0286…), shown in the Bank column.
+                'owner',
                 // Lean location columns — the whole details JSON would drag
                 // every Plaid payload through the render. On MySQL a JSON
                 // null arrives as the string "null"; filtered below.
@@ -52,7 +55,7 @@ class UnmatchedTransactionCards
             ->with([
                 // withoutGlobalScopes at EVERY nesting level — a scoped
                 // nested load would drop sibling companies' bank names.
-                'bank_account' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bank_id', 'type'])->with([
+                'bank_account' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bank_id', 'type', 'account_number'])->with([
                     'bank' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'vendor_id', 'name', 'plaid_ins_id'])->with([
                         'vendor' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'business_name']),
                     ]),

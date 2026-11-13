@@ -83,10 +83,23 @@ it('renders the page without printing any vendor into any card', function () {
         'plaid_merchant_name' => 'MENARDS', 'plaid_merchant_description' => 'MENARDS #3120',
         'details' => ['category' => ['Shops'], 'payment_channel' => 'in store'],
     ]);
+    // A charge on a shared card account names the card member that made it.
+    Transaction::create([
+        'transaction_date' => now()->subDay(), 'amount' => 6.30, 'bank_account_id' => $account->id, 'owner' => '0616',
+        'plaid_merchant_name' => null, 'plaid_merchant_description' => '*********-**********',
+        'details' => ['account_owner' => '0616', 'payment_channel' => 'in store'],
+    ]);
 
     $html = Livewire::actingAs($user)->test(MatchVendor::class)->html();
 
     expect($html)->toContain('MENARDS #3120');
+
+    // The Bank column names the bank and the card that made the charge when
+    // the bank names one, else the account's own number — not its type.
+    expect($html)->toContain('>Bank<')
+        ->and($html)->not->toContain('Bank | Type')
+        ->and($html)->toMatch('/Fixture Bank(?:\s|<!--.*?-->)*<span[^>]*>0001<\/span>/s')
+        ->and($html)->toMatch('/Fixture Bank(?:\s|<!--.*?-->)*<span[^>]*>0616<\/span>/s');
 
     // island_lazy() is off in tests, so both islands render inline. No card
     // carries vendor options: the picker fetches the shared list itself.

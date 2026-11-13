@@ -54,7 +54,7 @@
                                     <flux:table.column>Amount</flux:table.column>
                                     <flux:table.column>Date</flux:table.column>
                                     <flux:table.column>Location</flux:table.column>
-                                    <flux:table.column>Bank | Type</flux:table.column>
+                                    <flux:table.column>Bank</flux:table.column>
                                     <flux:table.column>Company</flux:table.column>
                                 </flux:table.columns>
                                 <flux:table.rows>
@@ -64,7 +64,11 @@
                                             <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
                                             <flux:table.cell>{{ $transaction->card_location }}</flux:table.cell>
                                             <flux:table.cell>
-                                                {{ $transaction->bank_account?->bank?->name ?? '' }} | {{ $transaction->bank_account?->type ?? '' }}
+                                                {{-- The card that made the charge when the bank names one (a
+                                                     Capital One card member: ••0616), else the account's own
+                                                     number. Both are int(4) zerofill in MySQL: padded the same
+                                                     way wherever they are read. --}}
+                                                {{ $transaction->bank_account?->bank?->name ?? '' }}@if(filled($transaction->owner ?: $transaction->bank_account?->account_number)) <span class="text-zinc-500 dark:text-zinc-400">{{ str_pad((string) ($transaction->owner ?: $transaction->bank_account->account_number), 4, '0', STR_PAD_LEFT) }}</span>@endif
                                             </flux:table.cell>
                                             <flux:table.cell>{{ $transaction->bank_account?->bank?->vendor?->business_name ?? '' }}</flux:table.cell>
                                         </flux:table.row>
