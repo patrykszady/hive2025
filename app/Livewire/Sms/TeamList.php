@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sms;
 
+use App\Livewire\Sms\Concerns\MarksThreadsRead;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\User;
@@ -20,6 +21,8 @@ use Livewire\Component;
 #[Isolate]
 class TeamList extends Component
 {
+    use MarksThreadsRead;
+
     public ?int $selectedThreadId = null;
 
     /** @return array<string, string> */

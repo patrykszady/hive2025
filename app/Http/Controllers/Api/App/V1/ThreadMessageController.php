@@ -9,9 +9,9 @@ use App\Http\Requests\Api\App\UpdateScheduledMessageRequest;
 use App\Http\Resources\Api\App\MessageResource;
 use App\Livewire\Sms\SmsNewThread;
 use App\Models\SmsMessage;
-use App\Models\SmsThreadRead;
 use App\Services\GroupSmsService;
 use App\Services\Sms\ScheduledMessageActions;
+use App\Services\Sms\ThreadReadMarker;
 use App\Services\SmsTranslationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -126,21 +126,23 @@ class ThreadMessageController extends Controller
         ], 201);
     }
 
-    public function markRead(Request $request, int $thread): JsonResponse
+    /**
+     * The conversation is read: opened in the app, or swiped in its Messages
+     * list. ThreadReadMarker also takes its texts out of the person's
+     * notifications; `unread_notifications` is what is left, for the app's
+     * badge.
+     */
+    public function markRead(Request $request, int $thread, ThreadReadMarker $marker): JsonResponse
     {
         $user = $request->user();
         $this->resolveAppThread($thread, $user);
 
-        $latestMessageId = SmsMessage::where('thread_id', $thread)->max('id');
+        $result = $marker->markRead($user, $thread);
 
-        if ($latestMessageId) {
-            SmsThreadRead::updateOrCreate(
-                ['thread_id' => $thread, 'user_id' => $user->id],
-                ['last_read_message_id' => $latestMessageId],
-            );
-        }
-
-        return response()->json(['read' => true]);
+        return response()->json([
+            'read' => true,
+            'unread_notifications' => $result['unread_notifications'] ?? 0,
+        ]);
     }
 
     /**

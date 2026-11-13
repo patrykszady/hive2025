@@ -14,6 +14,7 @@ use App\Models\SmsThreadRead;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
+use App\Services\Sms\ThreadReadMarker;
 use App\Services\SmsTranslationService;
 use App\Services\SmsTaskExtractionService;
 use App\Support\Sms\ConversationPresenter;
@@ -1788,5 +1789,11 @@ class SmsConversation extends Component
 
         // Notify thread list to update unread indicators
         $this->dispatch('sms-thread-read');
+
+        // Reading a conversation also takes its texts out of the person's
+        // notifications (ThreadReadMarker); the bell's badge follows.
+        if (app(ThreadReadMarker::class)->clearNotifications(auth()->user(), (int) $this->threadId) > 0) {
+            $this->dispatch('notification-read');
+        }
     }
 }

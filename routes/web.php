@@ -1152,22 +1152,8 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // In-app exits (thread switch / close) go through SmsConversation; this
     // handles leaving the page entirely (wire:navigate away, tab close) via
     // navigator.sendBeacon from the messages index.
-    Route::post('/messages/threads/{thread}/read', function (\App\Models\SmsGroupThread $thread) {
-        $user = auth()->user();
-
-        abort_unless(
-            \App\Models\SmsGroupThread::query()->accessibleTo($user)->whereKey($thread->id)->exists(),
-            403
-        );
-
-        $latestMessageId = $thread->messages()->max('id');
-
-        if ($latestMessageId) {
-            \App\Models\SmsThreadRead::updateOrCreate(
-                ['thread_id' => $thread->id, 'user_id' => $user->id],
-                ['last_read_message_id' => $latestMessageId],
-            );
-        }
+    Route::post('/messages/threads/{thread}/read', function (\App\Models\SmsGroupThread $thread, \App\Services\Sms\ThreadReadMarker $marker) {
+        abort_if($marker->markRead(auth()->user(), (int) $thread->id) === null, 403);
 
         return response()->noContent();
     })->name('sms.threads.read');

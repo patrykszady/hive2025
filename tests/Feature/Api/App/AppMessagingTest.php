@@ -109,7 +109,7 @@ it('shows a real unread count that clears once the thread is marked read', funct
 
     $this->postJson("/api/app/v1/threads/{$thread->id}/read")
         ->assertOk()
-        ->assertExactJson(['read' => true]);
+        ->assertExactJson(['read' => true, 'unread_notifications' => 0]);
 
     expect(SmsThreadRead::where(['thread_id' => $thread->id, 'user_id' => $user->id])->first()->last_read_message_id)
         ->toBe($message->id);

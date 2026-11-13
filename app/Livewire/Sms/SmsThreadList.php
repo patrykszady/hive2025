@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sms;
 
+use App\Livewire\Sms\Concerns\MarksThreadsRead;
 use App\Livewire\Sms\Concerns\ResolvesClientDisplayName;
 use App\Models\BlockedCaller;
 use App\Models\CallLog;
@@ -18,6 +19,7 @@ use Livewire\Component;
 #[Isolate]
 class SmsThreadList extends Component
 {
+    use MarksThreadsRead;
     use ResolvesClientDisplayName;
 
     public int $limit = 20;

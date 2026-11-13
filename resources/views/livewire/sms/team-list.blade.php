@@ -1,7 +1,7 @@
 <div class="h-full overflow-y-auto" data-team-list>
     @forelse ($this->rows as $row)
+        <x-sms.mark-read-swipe wire:key="team-row-{{ $row['key'] }}" :thread-id="$row['thread_id']" :unread="$row['unread']" button-class="{{ $this->canCall ? 'right-12' : 'right-2' }}">
         <div
-            wire:key="team-row-{{ $row['key'] }}"
             class="group flex items-center gap-2 rounded-lg px-3 py-2.5"
             x-bind:class="{{ $row['thread_id'] ? '$store.sms.threadId === '.$row['thread_id'] : 'false' }}
                 ? 'bg-zinc-100 dark:bg-zinc-700'
@@ -51,6 +51,7 @@
                 </button>
             @endif
         </div>
+        </x-sms.mark-read-swipe>
     @empty
         <div class="px-3 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
             Nobody else on the team yet.

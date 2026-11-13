@@ -112,8 +112,8 @@
         @php
             $isSpamThread = $this->threadIsSpam($thread);
         @endphp
+        <x-sms.mark-read-swipe wire:key="thread-{{ $thread->id }}" :thread-id="$thread->id" :unread="in_array($thread->id, $this->unreadThreadIds, true)">
         <button
-            wire:key="thread-{{ $thread->id }}"
             {{-- NOTE: this handler must START with the `if` statement — Alpine
                  only wraps expressions beginning with `if` as statement blocks
                  (a leading comment would make it an rvalue → syntax error). --}}
@@ -307,6 +307,7 @@
                 </div>
             </div>
         </button>
+        </x-sms.mark-read-swipe>
     @empty
         <div class="text-center py-8">
             <flux:icon name="chat-bubble-left-right" class="mx-auto h-8 w-8 text-zinc-300 dark:text-zinc-600" />
