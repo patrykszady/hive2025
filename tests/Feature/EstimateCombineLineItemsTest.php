@@ -250,6 +250,14 @@ it('leaves a signed contract\'s lines where they are', function () {
     expect($candidates->keys()->all())->toBe(['Floor Tile'])
         ->and(collect($candidates['Floor Tile']['lines'])->pluck('section')->all())->toBe(['Mudroom', 'Pantry']);
 
+    // A signed section is never offered to take combined lines, nor taken if asked for.
+    Livewire::test(EstimateCombineLineItems::class, ['estimate' => $fx['estimate']->fresh()])
+        ->dispatch('openCombineLineItems')
+        ->assertDontSeeHtml('wire:key="combine-into-'.$fx['section']->id.'"')->assertSeeHtml('wire:key="combine-into-'.$mudroom->id.'"')->assertSee('Section 4 on this estimate')
+        ->set('selected', [(string) $c['Floor Tile']->id])->set('into', (string) $fx['kitchen']->id)
+        ->call('combine')->assertHasErrors(['into' => 'in']);
+    expect(fn () => $combiner->combine($fx['estimate']->fresh(), [$c['Floor Tile']->id], '', $fx['kitchen']->id))->toThrow(InvalidArgumentException::class);
+
     // "Kitchen" is a signed section: the combined line gets a section of its own beside it, not a place in the contract.
     $result = $combiner->combine($fx['estimate']->fresh(), [$c['Floor Tile']->id], 'Kitchen');
     expect($result['section']->id)->not->toBe($fx['kitchen']->id)
@@ -317,6 +325,130 @@ it('combines from the estimate page: pick the items, name the section', function
     // Opened again, what is left to combine is the demo.
     $component->dispatch('openCombineLineItems')->assertSet('selected', [])->assertSet('sectionName', '')
         ->assertSee('Demo Bathroom')->assertDontSee('205 sq.ft.');
+});
+
+it('shows and combines one catalog item on its own, by its global line item id, never another item of the same name', function () {
+    $fx = roomsWithSharedItems();
+    $c = $fx['catalog'];
+    // A different catalog item that happens to be called Floor Tile too.
+    $fx['catalog']['Vinyl'] = LineItem::withoutGlobalScopes()->create([
+        'name' => 'Floor Tile', 'category' => 'Flooring', 'sub_category' => 'Vinyl', 'unit_type' => 'sq.ft.', 'cost' => 9, 'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]);
+    combineLine($fx, $fx['kitchen'], 'Vinyl', 30, ['name' => 'Floor Tile']);
+    combineLine($fx, $fx['laundry'], 'Vinyl', 12, ['name' => 'Floor Tile']);
+    $vinyl = $fx['catalog']['Vinyl'];
+    $row = fn (int $key) => 'wire:key="combine-item-'.$key.'"';
+
+    // Opened on the vinyl alone (a line's own combine button): only its lines, ticked, its trade suggested.
+    $component = Livewire::test(EstimateCombineLineItems::class, ['estimate' => $fx['estimate']])
+        ->dispatch('openCombineLineItems', only: $vinyl->id)
+        ->assertSet('only', (string) $vinyl->id)
+        ->assertSet('selected', [(string) $vinyl->id])
+        ->assertSet('sectionName', 'Flooring')
+        ->assertSee('42 sq.ft.')
+        ->assertSeeHtml($row($vinyl->id))
+        ->assertDontSeeHtml($row($c['Floor Tile']->id))
+        ->assertDontSeeHtml($row($c['Demo Bathroom']->id))
+        // The picker tells the two Floor Tiles apart by trade and catalog number.
+        ->assertSee('Floor Tile — Flooring/Vinyl (#'.$vinyl->id.')');
+
+    // Picking the other Floor Tile shows and ticks it alone.
+    $component->set('only', (string) $c['Floor Tile']->id)
+        ->assertSet('selected', [(string) $c['Floor Tile']->id])
+        ->assertSee('205 sq.ft.')
+        ->assertDontSeeHtml($row($vinyl->id));
+
+    // Every item again: all of them listed, the tick kept.
+    $component->set('only', '')
+        ->assertSet('selected', [(string) $c['Floor Tile']->id])
+        ->assertSeeHtml($row($vinyl->id))
+        ->assertSeeHtml($row($c['Demo Bathroom']->id));
+
+    // With one item shown, only it is combined — even with another ticked out of sight.
+    $component->set('only', (string) $vinyl->id)
+        ->set('selected', [(string) $vinyl->id, (string) $c['Floor Tile']->id])
+        ->set('sectionName', 'Vinyl')
+        ->call('combine')->assertHasNoErrors();
+
+    $vinylSection = EstimateSection::query()->where('estimate_id', $fx['estimate']->id)->where('name', 'Vinyl')->sole();
+    expect(EstimateLineItem::query()->where('section_id', $vinylSection->id)->get()->map(fn (EstimateLineItem $line) => [(int) $line->line_item_id, (float) $line->quantity])->all())
+        ->toBe([[$vinyl->id, 42.0]])
+        ->and(EstimateLineItem::query()->where('estimate_id', $fx['estimate']->id)->where('line_item_id', $c['Floor Tile']->id)->count())->toBe(3);
+});
+
+function linesIn(EstimateSection $section): array
+{
+    return EstimateLineItem::query()->where('section_id', $section->id)->orderBy('id')->get()
+        ->map(fn (EstimateLineItem $line) => [$line->name, (float) $line->quantity])->all();
+}
+
+it('puts the combined lines in a section already on the estimate, picked from the list — one they come from included', function () {
+    $fx = roomsWithSharedItems();
+    $c = $fx['catalog'];
+    $before = array_sum(sectionTotals($fx));
+
+    $component = Livewire::test(EstimateCombineLineItems::class, ['estimate' => $fx['estimate']])
+        ->dispatch('openCombineLineItems', only: $c['Floor Tile']->id)
+        // One combobox: the suggested new section to start with, then every section, numbered as the estimate numbers them.
+        ->assertSet('into', 'new')
+        ->assertSee('New section at the end of the estimate')
+        ->assertSeeHtml('wire:key="combine-into-'.$fx['section']->id.'"')->assertSee('Section 1 on this estimate')
+        ->assertSeeHtml('wire:key="combine-into-'.$fx['kitchen']->id.'"')->assertSee('Section 2 on this estimate')
+        ->assertSeeHtml('wire:key="combine-into-'.$fx['laundry']->id.'"')->assertSee('Section 3 on this estimate');
+
+    // A new section needs its name; a section that is not this estimate's (an id typed into the request) is refused.
+    $component->set('sectionName', '')->call('combine')->assertHasErrors(['sectionName' => 'required']);
+    $component->set('into', '999999')->call('combine')->assertHasErrors(['into' => 'in']);
+    expect(EstimateLineItem::query()->where('estimate_id', $fx['estimate']->id)->where('line_item_id', $c['Floor Tile']->id)->count())->toBe(3);
+
+    // A name typed and created in line, then the kitchen picked instead: the pick wins, and its name is not suggested over.
+    $component->set('into', (string) $fx['kitchen']->id)->set('sectionName', '  Flooring ')->call('newSection')
+        ->assertSet('into', 'new')->assertSet('sectionName', 'Flooring')->assertSee('Flooring');
+    $component->set('into', (string) $fx['kitchen']->id)->set('sectionName', 'Kitchen')
+        ->set('selected', [(string) $c['Floor Tile']->id])->assertSet('sectionName', 'Kitchen')
+        ->assertDontSee('New section at the end of the estimate');
+
+    // Into the kitchen, one of the rooms the tile comes from: no new section.
+    $component->call('combine')->assertHasNoErrors();
+
+    expect(linesIn($fx['kitchen']))->toBe([['Full Drywall', 4.0], ['Demo Bathroom', 1.0], ['Floor Tile', 205.0]])
+        ->and(linesIn($fx['laundry']))->toBe([['Roof Shingles', 10.0]])
+        ->and(EstimateSection::query()->where('estimate_id', $fx['estimate']->id)->count())->toBe(3)
+        ->and(array_sum(sectionTotals($fx)))->toEqualWithDelta($before, 0.01);
+
+    // Into a section the lines do not come from.
+    $finishes = EstimateSection::create(['estimate_id' => $fx['estimate']->id, 'name' => 'Finishes', 'total' => 0]);
+    $component->dispatch('openCombineLineItems')
+        ->set('selected', [(string) $c['Demo Bathroom']->id])
+        ->set('into', (string) $finishes->id)
+        ->call('combine')->assertHasNoErrors();
+
+    expect(linesIn($finishes))->toBe([['Demo Bathroom', 1.0]])
+        ->and(linesIn($fx['kitchen']))->toBe([['Full Drywall', 4.0], ['Floor Tile', 205.0]])
+        ->and(array_sum(sectionTotals($fx)))->toEqualWithDelta($before, 0.01);
+});
+
+it('keeps a change order\'s money on its own bid when a section is picked', function () {
+    $fx = estimateAdmin(claudeEstimateFixture());
+    $project = \App\Models\Project::withoutGlobalScopes()->findOrFail($fx['estimate']->project_id);
+    $changeOrder = \App\Models\Bid::withoutGlobalScopes()->create(['project_id' => $project->id, 'vendor_id' => $fx['vendor']->id, 'amount' => 0, 'type' => 2]);
+    $kitchen = EstimateSection::create(['estimate_id' => $fx['estimate']->id, 'name' => 'Kitchen', 'total' => 0]);
+    $mudroom = EstimateSection::create(['estimate_id' => $fx['estimate']->id, 'name' => 'Mudroom', 'total' => 0, 'bid_id' => $changeOrder->id]);
+    $pantry = EstimateSection::create(['estimate_id' => $fx['estimate']->id, 'name' => 'Pantry', 'total' => 0, 'bid_id' => $changeOrder->id]);
+    combineLine($fx, $kitchen, 'Floor Tile', 100);
+    combineLine($fx, $mudroom, 'Floor Tile', 60);
+    combineLine($fx, $pantry, 'Floor Tile', 25);
+
+    $combiner = app(EstimateLineItemCombiner::class);
+    $combiner->combine($fx['estimate'], collect($combiner->candidates($fx['estimate']))->pluck('key')->all(), '', $kitchen->id);
+
+    // The contract's tile goes in the kitchen picked; the change order's in a Kitchen on its own bid.
+    $kitchens = EstimateSection::query()->where('estimate_id', $fx['estimate']->id)->where('name', 'Kitchen')->orderBy('id')->get();
+    expect($kitchens)->toHaveCount(2)
+        ->and($kitchens->first()->id)->toBe($kitchen->id)
+        ->and(linesIn($kitchen))->toBe([['Floor Tile', 145.0]])
+        ->and($kitchens->last()->bid_id)->toBe($changeOrder->id)
+        ->and(linesIn($kitchens->last()))->toBe([['Floor Tile', 85.0]]);
 });
 
 it('is for whoever may change the estimate, and says so when there is nothing to combine', function () {

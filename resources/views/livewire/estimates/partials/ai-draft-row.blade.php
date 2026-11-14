@@ -32,6 +32,14 @@
                 @endif
             </div>
             <div class="leading-5"><i>{{ $item['category'] ?? '' }}@if(!empty($item['sub_category']))/{{ $item['sub_category'] }}@endif</i></div>
+            {{-- The line's notes, the client's to read on the signing page; click the line to change them (2026-11-14). --}}
+            @if(!empty($item['notes']))
+                <div class="mt-1 text-xs font-normal italic leading-4 text-zinc-500 dark:text-zinc-400 whitespace-pre-line" data-line-notes>{{ $item['notes'] }}</div>
+            @endif
+            {{-- Drafted lines from several sections, now one line (Combine Items). --}}
+            @if(!empty($item['combined']))
+                <div class="mt-1"><flux:badge size="sm" color="zinc" icon="arrows-pointing-in" data-combined-line>Combined</flux:badge></div>
+            @endif
         </div>
     </flux:table.cell>
     <flux:table.cell class="align-top">
@@ -53,7 +61,13 @@
     <flux:table.cell variant="strong" class="align-top" :x-text="$editable ? 'money(lineTotal('.$index.'))' : null">{{ money($quantity * $cost) }}</flux:table.cell>
     <flux:table.cell class="align-top !pr-6">
         @if($editable)
-            <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="removeItem({{ $index }}{{ !empty($item['id']) ? ', '.(int) $item['id'] : '' }})" aria-label="Remove {{ $item['name'] ?? 'this line' }}" />
+            <div class="flex items-center justify-end gap-1">
+                {{-- In more than one section: combine this catalog item alone (same global line_item id), 2026-11-14. --}}
+                @if(in_array((int) ($item['line_item_id'] ?? 0), $repeatedIds ?? [], true))
+                    <flux:button size="xs" variant="ghost" icon="arrows-pointing-in" wire:click="combineItem({{ (int) $item['line_item_id'] }})" aria-label="Combine every {{ $item['name'] ?? 'line' }} into one line" tooltip="Combine every {{ $item['name'] ?? 'line' }} into one line" data-combine-item />
+                @endif
+                <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="removeItem({{ $index }}{{ !empty($item['id']) ? ', '.(int) $item['id'] : '' }})" aria-label="Remove {{ $item['name'] ?? 'this line' }}" />
+            </div>
         @else
             <flux:icon.check class="w-4 h-4 text-green-500 draft-row-done" />
             <flux:icon.arrow-path class="w-4 h-4 text-indigo-500 animate-spin draft-row-current" />

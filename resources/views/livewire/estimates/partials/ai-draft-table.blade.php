@@ -47,12 +47,13 @@
                         </flux:table.cell>
                         <flux:table.cell variant="strong" :x-text="$drafting ? null : 'money(sectionTotal('.$currentSection.'))'">{{ money($sectionTotals[$currentSection] ?? 0) }}</flux:table.cell>
                         <flux:table.cell class="!pr-6">
-                            @unless($drafting)
+                            {{-- A section holding only lines combined into it (Combine Items) was not drafted: nothing to draft again or remove as a draft. --}}
+                            @if(! $drafting && in_array($currentSection, $runSections ?? [], true))
                                 <div class="flex items-center justify-end gap-1">
                                     <flux:button size="xs" variant="ghost" icon="arrow-path" wire:click="startRedo({{ (int) $currentSection }})" aria-label="Draft {{ $item['section_name'] ?? 'this section' }} again" tooltip="Draft this section again" />
                                     <flux:button size="xs" variant="ghost" icon="trash" wire:click="removeSection({{ (int) $currentSection }})" wire:confirm="Remove everything drafted into {{ $item['section_name'] ?? 'this section' }}?" aria-label="Remove everything drafted into {{ $item['section_name'] ?? 'this section' }}" tooltip="Remove this section's draft" />
                                 </div>
-                            @endunless
+                            @endif
                         </flux:table.cell>
                     </flux:table.row>
                     @if(! $drafting && ($redoSectionId ?? null) === $currentSection)

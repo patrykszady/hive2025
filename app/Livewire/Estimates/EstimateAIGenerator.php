@@ -997,14 +997,50 @@ class EstimateAIGenerator extends Component
         $this->pollDraft();
     }
 
-    /** Done — and straight on to combining what the rooms have in common (flooring, paint) into sections of their own. */
-    public function finishAndCombine(): void
+    /**
+     * Combine Items without leaving the review: the estimate's own Combine
+     * window opens over this one, the items the draft put in more than one
+     * section (the flooring, the paint) ticked; once they are combined the
+     * review shows the combined lines in their place (reloadAfterCombine).
+     * Done stays the estimator's own click.
+     */
+    public function combineItems(): void
     {
-        // The catalog items the draft put in more than one section: ticked for the estimator when the next window opens.
-        $repeated = $this->runs()->repeatedItemIds($this->generatedItems);
+        $this->dispatch('openCombineLineItems', tick: $this->runs()->repeatedItemIds($this->generatedItems))->to('estimates.estimate-combine-line-items');
+    }
 
-        $this->finish();
-        $this->dispatch('openCombineLineItems', tick: $repeated)->to('estimates.estimate-combine-line-items');
+    /** A line's own combine button: the Combine window opens on its catalog item alone — only lines with the same global line_item id. */
+    public function combineItem(int $lineItemId): void
+    {
+        $this->dispatch('openCombineLineItems', only: $lineItemId)->to('estimates.estimate-combine-line-items');
+    }
+
+    /**
+     * The names of the catalog items the draft put in more than one section,
+     * in the order they first come.
+     *
+     * @param  list<int>  $repeated  as EstimateDraftRuns::repeatedItemIds() gives them
+     * @return list<string>
+     */
+    protected function repeatedItemNames(array $repeated): array
+    {
+        return collect($this->generatedItems)
+            ->filter(fn (array $row) => in_array((int) ($row['line_item_id'] ?? 0), $repeated, true))
+            ->pluck('name')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** Lines were combined, from the review or from the estimate behind it: the review re-reads what it shows. */
+    #[On('estimate-line-items-combined')]
+    public function reloadAfterCombine(): void
+    {
+        $run = $this->showPreview ? $this->run() : null;
+
+        if ($run !== null) {
+            $this->generatedItems = $this->rowsFor($run);
+        }
     }
 
     /** The section rows after the estimate's own sections changed: the scan's and the typed ones kept, the existing ones re-read. */
@@ -1075,7 +1111,7 @@ class EstimateAIGenerator extends Component
 
         $this->generatedItems = collect($this->generatedItems)
             ->filter(fn (array $row) => $lines->has($row['id']))
-            ->map(fn (array $row) => $this->rowFor($lines->get($row['id']), $sections))
+            ->map(fn (array $row) => $this->rowFor($lines->get($row['id']), $sections) + ['combined' => $row['combined'] ?? false])
             ->values()
             ->all();
     }
@@ -1204,6 +1240,7 @@ class EstimateAIGenerator extends Component
         $run = $this->run();
         $onEstimate = $this->estimate->estimate_sections()->pluck('name')->map(fn ($name) => Str::lower(trim((string) $name)))->filter()->all();
         $draftedSections = collect($this->generatedItems)->pluck('section_name', 'section_id');
+        $repeatedIds = $this->showPreview ? $this->runs()->repeatedItemIds($this->generatedItems) : [];
 
         return view('livewire.estimates.estimate-ai-generator', [
             'estimatedTotal' => $this->getEstimatedTotalProperty(),
@@ -1222,9 +1259,13 @@ class EstimateAIGenerator extends Component
             'reusedStanding' => ! $this->isGenerating && ! $this->showPreview && ($reused = $this->reusedRun()) !== null
                 ? app(EstimateAiDraftWriter::class)->standing($this->estimate, $reused->load('drafts'))['removable']
                 : 0,
-            // The same catalog item drafted into more than one section: worth offering to combine.
-            'repeatsAcrossSections' => $this->showPreview && collect($this->generatedItems)->groupBy('line_item_id')->contains(fn ($rows) => $rows->pluck('section_id')->unique()->count() > 1),
+            // The catalog items the draft put in more than one section, by name: the review offers to combine them.
+            'repeatedItems' => $this->repeatedItemNames($repeatedIds),
+            // Their catalog ids: each of their lines gets a button combining that item alone.
+            'repeatedIds' => $repeatedIds,
             'newSections' => collect((array) $run?->sections)->whereIn('origin', ['created', 'named'])->pluck('section_id')->filter()->all(),
+            // The sections the draft itself drafted into; a section that only holds combined lines has no Draft again or Remove.
+            'runSections' => collect((array) $run?->sections)->pluck('section_id')->filter()->map(fn ($id) => (int) $id)->values()->all(),
             'sectionScopes' => collect((array) $run?->sections)->filter(fn (array $section) => ! empty($section['section_id']) && filled($section['scope'] ?? null))->pluck('scope', 'section_id')->all(),
             // What the estimator typed for a section alone, shown with it while it is drafted and in the review.
             'sectionNotes' => $this->runs()->sectionNotes($run),

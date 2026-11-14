@@ -39,7 +39,13 @@ class EstimateCombineItemsController extends Controller
             return response()->json(['message' => 'Those items can no longer be combined. Reload the list.'], 422);
         }
 
-        $result = $combiner->combine($found, $chosen, $request->validated('section_name'));
+        $intoSectionId = $request->validated('section_id');
+
+        try {
+            $result = $combiner->combine($found, $chosen, (string) $request->validated('section_name'), $intoSectionId !== null ? (int) $intoSectionId : null);
+        } catch (\InvalidArgumentException) {
+            return response()->json(['message' => 'That section cannot take combined items. Pick another.', 'errors' => ['section_id' => ['That section cannot take combined items. Pick another.']]], 422);
+        }
 
         return response()->json([
             'data' => [

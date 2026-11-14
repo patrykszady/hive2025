@@ -829,28 +829,131 @@ it('does not lose what was typed when the window is closed and opened again, and
     expect(EstimateAiRun::count())->toBe(1);
 });
 
-it('offers to combine what the rooms have in common straight from the review', function () {
+it('combines what the rooms have in common inside the review, and shows the combined line there', function () {
+    [$fx, $component] = sectionsGenerator();
+    $c = $fx['catalog'];
+    $component->call('addSectionRow')->call('addSectionRow')->call('addSectionRow');
+    $first = count($component->get('sectionRows')) - 3;
+    $component->set("sectionRows.{$first}.name", 'Dining Room')
+        ->set('sectionRows.'.($first + 1).'.name', 'Kitchen')
+        ->set('sectionRows.'.($first + 2).'.name', 'Pantry');
+    $c['Floor Tile']->update(['notes' => 'Grout color chosen by the homeowner.']);
+    claudeDrafts([
+        ['S1', 'Dining Room', 'Floor and trim.', [[$c['Floor Tile'], 50], [$c['Baseboard Install'], 40]]],
+        ['S2', 'Kitchen', 'Floor and trim.', [[$c['Floor Tile'], 120], [$c['Baseboard Install'], 60]]],
+        ['S3', 'Pantry', 'Floor only.', [[$c['Floor Tile'], 20]]],
+    ]);
+
+    // The review says up top what repeats and offers Combine Items, shows each line's notes, and opens Combine over itself with the repeated items ticked.
+    $component->call('generate')
+        ->assertSee('2 items are in more than one section: Floor Tile, Baseboard Install.')
+        ->assertSee('Grout color chosen by the homeowner.')
+        ->assertSee('Combine Items')
+        ->call('combineItems')
+        ->assertDispatched('openCombineLineItems', tick: [$c['Floor Tile']->id, $c['Baseboard Install']->id])
+        ->assertSet('showPreview', true)
+        // Each repeated line has its own button, opening the window on that catalog item alone.
+        ->assertSeeHtml('combineItem('.$c['Floor Tile']->id.')')
+        ->call('combineItem', $c['Floor Tile']->id)
+        ->assertDispatched('openCombineLineItems', only: $c['Floor Tile']->id);
+    $before = $component->get('estimatedTotal');
+
+    // The estimator combines the floor tile (the hall bath's own 45 sq.ft. with it) into Flooring.
+    Livewire::test(\App\Livewire\Estimates\EstimateCombineLineItems::class, ['estimate' => $fx['estimate']])
+        ->dispatch('openCombineLineItems', tick: [$c['Floor Tile']->id])
+        ->set('sectionName', 'Flooring')
+        ->call('combine')->assertHasNoErrors()
+        ->assertDispatched('estimate-line-items-combined');
+
+    // The review is still open, still a draft, and shows the combined line where the three tile lines were.
+    $component->dispatch('estimate-line-items-combined')->assertSet('showPreview', true);
+    $rows = collect($component->get('generatedItems'));
+    $flooring = sectionNamed($fx, 'Flooring');
+
+    expect($rows->pluck('name')->all())->toBe(['Baseboard Install', 'Baseboard Install', 'Floor Tile'])
+        ->and($rows->last())->toMatchArray(['section_id' => $flooring->id, 'quantity' => 235.0, 'combined' => true])
+        ->and($rows->where('combined', false)->pluck('section_name')->all())->toBe(['Dining Room', 'Kitchen'])
+        // The hall bath's 45 sq.ft. came in with the combined line.
+        ->and($component->get('estimatedTotal'))->toEqualWithDelta($before + 45 * (float) $c['Floor Tile']->cost, 0.01)
+        ->and(EstimateAiDraft::query()->pluck('status')->unique()->all())->toBe(['drafted']);
+    $component->assertSee('Combined')
+        // Only the baseboard repeats now, and only its lines keep a combine button.
+        ->assertSee('1 item is in more than one section: Baseboard Install.')
+        ->assertSeeHtml('combineItem('.$c['Baseboard Install']->id.')')
+        ->assertDontSeeHtml('combineItem('.$c['Floor Tile']->id.')')
+        // Flooring was not drafted, so it has no Draft again or Remove of its own.
+        ->assertDontSeeHtml('removeSection('.$flooring->id.')')
+        ->assertSeeHtml('removeSection('.sectionNamed($fx, 'Kitchen')->id.')');
+
+    // The combined line is the review's to change.
+    $index = $rows->keys()->last();
+    $component->set("generatedItems.{$index}.quantity", 240);
+    expect((float) EstimateLineItem::query()->find($rows->last()['id'])->quantity)->toBe(240.0);
+
+    // Done keeps it, and the Pantry, left empty by the combine, does not stay behind.
+    $component->call('finish');
+    expect(linesOf($flooring))->toBe([['Floor Tile', 240.0]])
+        ->and(sectionNamed($fx, 'Pantry'))->toBeNull()
+        ->and(linesOf(sectionNamed($fx, 'Kitchen')))->toBe([['Baseboard Install', 60.0]])
+        ->and(EstimateAiDraft::query()->pluck('status')->unique()->all())->toBe(['finished']);
+});
+
+it('keeps a combined line put in a drafted section when that section is drafted again or its draft removed', function () {
     [$fx, $component] = sectionsGenerator();
     $c = $fx['catalog'];
     $component->call('addSectionRow')->call('addSectionRow');
     $first = count($component->get('sectionRows')) - 2;
     $component->set("sectionRows.{$first}.name", 'Dining Room')->set('sectionRows.'.($first + 1).'.name', 'Kitchen');
-
-    // One item in one section only: nothing to combine, no offer.
-    claudeDrafts([['S1', 'Dining Room', 'Floor.', [[$c['Floor Tile'], 50]]]]);
-    $component->call('generate')->assertDontSee('Done, then combine items')->call('discardDraft');
-
     claudeDrafts([
-        ['S1', 'Dining Room', 'Floor.', [[$c['Floor Tile'], 50]]],
-        ['S2', 'Kitchen', 'Floor.', [[$c['Floor Tile'], 120]]],
+        ['S1', 'Dining Room', 'Trim and drywall.', [[$c['Baseboard Install'], 40], [$c['Full Drywall'], 2]]],
+        ['S2', 'Kitchen', 'Trim and drywall.', [[$c['Baseboard Install'], 60], [$c['Full Drywall'], 4]]],
     ]);
-    $component->call('generate')
-        ->assertSee('Done, then combine items')
-        ->call('finishAndCombine')
-        ->assertSet('showPreview', false)
-        ->assertDispatched('openCombineLineItems');
+    $component->call('generate');
+    $kitchen = sectionNamed($fx, 'Kitchen');
 
-    expect(EstimateAiDraft::query()->pluck('status')->unique()->all())->toBe(['finished']);
+    // Both rooms' baseboard combined into the kitchen itself, picked as an existing section.
+    Livewire::test(\App\Livewire\Estimates\EstimateCombineLineItems::class, ['estimate' => $fx['estimate']])
+        ->dispatch('openCombineLineItems', only: $c['Baseboard Install']->id)
+        ->set('into', (string) $kitchen->id)
+        ->call('combine')->assertHasNoErrors();
+    $component->dispatch('estimate-line-items-combined');
+    expect(collect($component->get('generatedItems'))->where('section_id', $kitchen->id)->map(fn (array $row) => [$row['name'], $row['quantity'], $row['combined']])->values()->all())
+        ->toBe([['Full Drywall', 4.0, false], ['Baseboard Install', 100.0, true]]);
+
+    // Drafted again, the kitchen's own draft is replaced; the combined line, carrying the dining room's 40 ft too, stays.
+    claudeDrafts([['S1', 'Kitchen', 'More drywall.', [[$c['Full Drywall'], 9]]]]);
+    $component->call('startRedo', $kitchen->id)->set('redoNote', 'More drywall')->call('redoSection')->assertHasNoErrors();
+    expect(linesOf($kitchen))->toBe([['Baseboard Install', 100.0], ['Full Drywall', 9.0]]);
+
+    // Its draft removed: the same.
+    $component->call('removeSection', $kitchen->id);
+    expect(linesOf($kitchen->fresh()))->toBe([['Baseboard Install', 100.0]]);
+});
+
+it('takes a combined line made only of drafted lines with a draft discarded in the review', function () {
+    [$fx, $component] = sectionsGenerator();
+    $c = $fx['catalog'];
+    $component->call('addSectionRow')->call('addSectionRow');
+    $first = count($component->get('sectionRows')) - 2;
+    $component->set("sectionRows.{$first}.name", 'Dining Room')->set('sectionRows.'.($first + 1).'.name', 'Kitchen');
+    claudeDrafts([
+        ['S1', 'Dining Room', 'Trim.', [[$c['Baseboard Install'], 40]]],
+        ['S2', 'Kitchen', 'Trim.', [[$c['Baseboard Install'], 60]]],
+    ]);
+    $component->call('generate');
+
+    Livewire::test(\App\Livewire\Estimates\EstimateCombineLineItems::class, ['estimate' => $fx['estimate']])
+        ->dispatch('openCombineLineItems', tick: [$c['Baseboard Install']->id])
+        ->set('sectionName', 'Trim')
+        ->call('combine')->assertHasNoErrors();
+    $component->dispatch('estimate-line-items-combined');
+    expect(collect($component->get('generatedItems'))->pluck('quantity')->all())->toBe([100.0]);
+
+    $component->call('discardDraft');
+
+    expect(linesOf(sectionNamed($fx, 'Trim')))->toBe([])
+        ->and(sectionNamed($fx, 'Dining Room'))->toBeNull()
+        ->and(sectionNamed($fx, 'Kitchen'))->toBeNull();
 });
 
 it('comes back up on its own draft when the page is reloaded mid-draft, and not on a colleague\'s', function () {
@@ -1105,9 +1208,10 @@ it('warns before drafting a request again while its first draft still stands, an
         ['S1', 'Dining Room', 'Trim and drywall.', [[$c['Baseboard Install'], 40], [$c['Full Drywall'], 2]]],
         ['S2', 'Kitchen', 'Trim and drywall.', [[$c['Baseboard Install'], 60], [$c['Full Drywall'], 4]]],
     ]);
-    $component->call('generate')->call('finishAndCombine')
-        // Both items are in both rooms: ticked for the estimator in the window that opens next.
-        ->assertDispatched('openCombineLineItems', tick: [$c['Baseboard Install']->id, $c['Full Drywall']->id]);
+    $component->call('generate')->call('combineItems')
+        // Both items are in both rooms: ticked for the estimator in the window that opens over the review.
+        ->assertDispatched('openCombineLineItems', tick: [$c['Baseboard Install']->id, $c['Full Drywall']->id])
+        ->call('finish');
     $run = EstimateAiRun::sole();
 
     // The estimator combines the baseboard only.

@@ -215,11 +215,19 @@
             {{-- DRAFT COMPLETE: the same banner and table, now on the estimate --}}
             <div class="space-y-4">
                 <div class="flex items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                    <flux:icon.check-circle class="w-5 h-5 text-indigo-500" />
-                    <div>
+                    <flux:icon.check-circle class="w-5 h-5 shrink-0 text-indigo-500" />
+                    <div class="min-w-0 flex-1">
                         <p class="text-sm font-medium text-indigo-700 dark:text-indigo-300">{{ count($generatedItems) }} {{ count($generatedItems) === 1 ? 'line item' : 'line items' }} drafted into {{ $draftedInto }}</p>
                         <p class="text-xs text-indigo-500 dark:text-indigo-400">Click a line to edit it, change a quantity here, or remove what you don't need. Nothing else on the estimate changed.</p>
+                        @if($repeatedItems !== [])
+                            <p class="mt-1 text-xs text-indigo-600 dark:text-indigo-300" data-repeated-items>
+                                {{ count($repeatedItems) }} {{ count($repeatedItems) === 1 ? 'item is' : 'items are' }} in more than one section: {{ implode(', ', array_slice($repeatedItems, 0, 4)) }}{{ count($repeatedItems) > 4 ? ' and '.(count($repeatedItems) - 4).' more' : '' }}.
+                            </p>
+                        @endif
                     </div>
+                    @if($repeatedItems !== [])
+                        <flux:button size="sm" variant="filled" icon="arrows-pointing-in" class="shrink-0 whitespace-nowrap" wire:click="combineItems">Combine Items</flux:button>
+                    @endif
                 </div>
 
                 @if($error)
@@ -254,17 +262,16 @@
                     </flux:callout>
                 @endif
 
-                {{-- Actions --}}
-                <div class="flex items-center justify-between gap-3 flex-nowrap">
+                {{-- Actions, kept in view at the bottom of the window however long the draft (2026-11-14: 91 lines put them out of sight). --}}
+                <div class="sticky -bottom-6 z-10 -mx-6 -mb-6 flex items-center justify-between gap-3 flex-nowrap border-t border-zinc-200 bg-white px-6 py-4 dark:border-white/10 dark:bg-zinc-800" data-review-actions>
                     <flux:button variant="ghost" class="whitespace-nowrap" icon="trash" wire:click="discardDraft" wire:confirm="Remove every drafted line item, and the sections this draft added, from the estimate?">
                         Discard Draft
                     </flux:button>
                     <div class="flex items-center gap-2">
-                        @if($repeatsAcrossSections)
-                            <flux:button variant="filled" class="whitespace-nowrap" icon="arrows-pointing-in" wire:click="finishAndCombine">
-                                Done, then combine items
-                            </flux:button>
-                        @endif
+                        {{-- The estimate's Combine Items, opened over the review; the review then shows the combined lines (2026-11-14). --}}
+                        <flux:button variant="filled" class="whitespace-nowrap" icon="arrows-pointing-in" wire:click="combineItems">
+                            Combine Items
+                        </flux:button>
                         <flux:button variant="primary" class="whitespace-nowrap" icon="check" wire:click="finish">
                             Done
                         </flux:button>

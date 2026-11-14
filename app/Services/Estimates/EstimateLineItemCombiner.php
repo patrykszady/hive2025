@@ -88,19 +88,38 @@ class EstimateLineItemCombiner
      * an unlocked section already carrying that name (and on the same bid as
      * the lines), or a new one at the end of the estimate, on that bid.
      *
+     * Or into a section of the estimate picked by the estimator ($intoSectionId,
+     * 2026-11-14) — any unlocked one, one the lines come from included. Money
+     * still never crosses bids: lines on another bid than that section go to
+     * a section of its name on their own bid, as with a typed name.
+     *
      * @param  list<string>  $keys  as candidates() lists them
      * @return array{section: EstimateSection, combined: list<EstimateLineItem>, items: int, removed: int, emptied: list<string>}  `combined` holds every line made — more than `items` when an item was priced more than one way
+     *
+     * @throws \InvalidArgumentException  nothing to combine, no section name, or a picked section that is not this estimate's or is signed
      */
-    public function combine(Estimate $estimate, array $keys, string $sectionName): array
+    public function combine(Estimate $estimate, array $keys, string $sectionName, ?int $intoSectionId = null): array
     {
         $groups = $this->groups($estimate)->only(array_map('strval', $keys));
+        $into = null;
+
+        if ($intoSectionId !== null) {
+            $into = $estimate->estimate_sections()->find($intoSectionId);
+
+            if ($into === null || $into->isLocked()) {
+                throw new \InvalidArgumentException('That section cannot take combined items.');
+            }
+
+            $sectionName = filled($into->name) ? (string) $into->name : 'Unnamed Section';
+        }
+
         $sectionName = trim($sectionName);
 
         if ($groups->isEmpty() || $sectionName === '') {
             throw new \InvalidArgumentException('Nothing to combine.');
         }
 
-        return DB::transaction(function () use ($estimate, $groups, $sectionName) {
+        return DB::transaction(function () use ($estimate, $groups, $sectionName, $into) {
             $combined = [];
             $removed = 0;
             $touched = [];
@@ -108,7 +127,9 @@ class EstimateLineItemCombiner
 
             foreach ($groups as $lines) {
                 $bidId = $lines->first()->section->bid_id;
-                $section = $targets[$bidId ?? self::NO_BID] ??= $this->targetSection($estimate, $sectionName, $bidId);
+                $section = $targets[$bidId ?? self::NO_BID] ??= $into !== null && (int) ($into->bid_id ?? self::NO_BID) === (int) ($bidId ?? self::NO_BID)
+                    ? $into
+                    : $this->targetSection($estimate, $sectionName, $bidId);
 
                 foreach ($this->byPrice($lines) as $priced) {
                     $line = $this->combineInto($section, $priced);

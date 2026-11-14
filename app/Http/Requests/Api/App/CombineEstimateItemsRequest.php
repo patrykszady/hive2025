@@ -25,7 +25,9 @@ class CombineEstimateItemsRequest extends FormRequest
         return [
             'keys' => ['required', 'array', 'min:1'],
             'keys.*' => ['required', 'string', 'max:40'],
-            'section_name' => ['required', 'string', 'max:60'],
+            // A new section by name, or one of the estimate's own sections by id (2026-11-14).
+            'section_name' => ['required_without:section_id', 'nullable', 'string', 'max:60'],
+            'section_id' => ['nullable', 'integer'],
         ];
     }
 
@@ -36,7 +38,7 @@ class CombineEstimateItemsRequest extends FormRequest
     {
         return [
             'keys.required' => 'Tick at least one item to combine.',
-            'section_name.required' => 'Name the section the combined items go in.',
+            'section_name.required_without' => 'Name the section the combined items go in.',
             'section_name.max' => 'A section name can be 60 characters at most.',
         ];
     }

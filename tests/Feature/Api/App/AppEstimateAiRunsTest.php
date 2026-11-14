@@ -574,6 +574,24 @@ it('combines the items the rooms share, a line per unit price, and never changes
     $this->getJson($fx['url'].'/combine-items')->assertOk()->assertExactJson(['data' => []]);
 });
 
+it('combines into a section already on the estimate, by its id', function () {
+    $fx = appAiEstimate();
+    $c = $fx['catalog'];
+    $run = appAiReviewedRun($fx);
+    $this->postJson($fx['url'].'/ai-runs/'.$run['id'].'/finish')->assertOk();
+    $kitchen = $run['sections'][1]['section_id'];
+    $key = $this->getJson($fx['url'].'/combine-items')->assertOk()->json('data.0.key');
+
+    // Neither a name nor a section; a section of another estimate.
+    $this->postJson($fx['url'].'/combine-items', ['keys' => [$key]])->assertStatus(422)->assertJsonValidationErrors(['section_name']);
+    $this->postJson($fx['url'].'/combine-items', ['keys' => [$key], 'section_id' => 999999])->assertStatus(422)->assertJsonValidationErrors(['section_id']);
+
+    $result = $this->postJson($fx['url'].'/combine-items', ['keys' => [$key], 'section_id' => $kitchen])->assertOk()->json('data');
+
+    expect($result['section']['id'])->toBe($kitchen)
+        ->and(EstimateLineItem::query()->where('section_id', $kitchen)->where('line_item_id', $c['Floor Tile']->id)->pluck('quantity')->map(fn ($q) => (float) $q)->all())->toBe([205.0]);
+});
+
 it('takes a quantity and a price for a no-unit line in the review, and only a quantity for the rest', function () {
     $fx = appAiEstimate();
     $run = appAiReviewedRun($fx);

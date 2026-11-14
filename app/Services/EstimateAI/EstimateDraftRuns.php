@@ -159,13 +159,17 @@ class EstimateDraftRuns
 
     /**
      * The lines a run has drafted that are still on the estimate, section by
-     * section in the order they were drafted.
+     * section in the order they were drafted. A drafted line since combined
+     * with its likes (Combine Items, from the review or from the estimate)
+     * is shown as the combined line it went into, once, flagged `combined`,
+     * after the drafted lines of whichever section that line is in.
      *
      * @return list<array<string, mixed>>
      */
     public function lines(Estimate $estimate, EstimateAiRun $run): array
     {
-        $ids = $this->draftedIds($estimate, $run);
+        [$drafted, $combined] = $this->reviewIds($estimate, $run);
+        $ids = $drafted->merge($combined)->unique()->values();
 
         if ($ids->isEmpty()) {
             return [];
@@ -177,7 +181,9 @@ class EstimateDraftRuns
         return $ids
             ->map(fn ($id) => $lines->get((int) $id))
             ->filter()
-            ->map(fn (EstimateLineItem $line) => $this->row($line, $sections))
+            ->map(fn (EstimateLineItem $line) => $this->row($line, $sections) + ['combined' => $combined->contains((int) $line->id)])
+            ->groupBy('section_id')
+            ->flatten(1)
             ->values()
             ->all();
     }
@@ -206,17 +212,20 @@ class EstimateDraftRuns
             'unit_type' => $line->unit_type,
             'cost' => (float) $line->cost,
             'total' => (float) $line->total,
+            // The client-facing notes, as the signing page shows them under the line.
+            'notes' => filled($line->notes) ? trim((string) $line->notes) : null,
         ];
     }
 
     /**
      * A line the review may change: one the draft under review itself put on
-     * the estimate, and not held by a signature. Line ids are client-held;
-     * without this any line of the estimate could be named.
+     * the estimate, or the combined line one of those went into, and not held
+     * by a signature. Line ids are client-held; without this any line of the
+     * estimate could be named.
      */
     public function draftedLine(Estimate $estimate, ?EstimateAiRun $run, mixed $id): ?EstimateLineItem
     {
-        if ($run === null || ! is_numeric($id) || ! $this->draftedIds($estimate, $run)->contains((int) $id)) {
+        if ($run === null || ! is_numeric($id) || ! collect($this->reviewIds($estimate, $run))->flatten()->contains((int) $id)) {
             return null;
         }
 
@@ -285,7 +294,8 @@ class EstimateDraftRuns
     public function removeSection(Estimate $estimate, EstimateAiRun $run, int $sectionId): array
     {
         foreach ($this->lines($estimate, $run) as $row) {
-            if ((int) $row['section_id'] === $sectionId) {
+            // A combined line put in this section carries other sections' work too: it goes only by its own ✕.
+            if ((int) $row['section_id'] === $sectionId && empty($row['combined'])) {
                 $this->draftedLine($estimate, $run, $row['id'])?->forceDelete();
             }
         }
@@ -353,7 +363,8 @@ class EstimateDraftRuns
         $note = implode('; ', array_filter([trim((string) ($planned['note'] ?? '')), trim($note)]));
 
         foreach ($this->lines($estimate, $run) as $row) {
-            if ((int) $row['section_id'] === $section->id) {
+            // A combined line put in this section carries other sections' work too, and stays.
+            if ((int) $row['section_id'] === $section->id && empty($row['combined'])) {
                 $this->draftedLine($estimate, $run, $row['id'])?->forceDelete();
             }
         }
@@ -494,13 +505,19 @@ class EstimateDraftRuns
             ->all();
     }
 
-    /** @return Collection<int, int> the estimate line ids the run's drafts recorded, in drafted order */
-    private function draftedIds(Estimate $estimate, EstimateAiRun $run): Collection
+    /**
+     * The estimate line ids a run's review covers, in drafted order: the
+     * lines its drafts recorded, and the combined lines any of those went
+     * into (EstimateLineItemCombiner::tellDrafts()).
+     *
+     * @return array{0: Collection<int, int>, 1: Collection<int, int>}
+     */
+    private function reviewIds(Estimate $estimate, EstimateAiRun $run): array
     {
-        return $run->drafts()->where('estimate_id', $estimate->id)->orderBy('id')->get()
-            ->flatMap(fn (EstimateAiDraft $draft) => array_column($draft->drafted_items ?? [], 'estimate_line_item_id'))
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->values();
+        $items = $run->drafts()->where('estimate_id', $estimate->id)->orderBy('id')->get()
+            ->flatMap(fn (EstimateAiDraft $draft) => (array) $draft->drafted_items);
+        $ids = fn (string $key) => $items->pluck($key)->filter()->map(fn ($id) => (int) $id)->unique()->values();
+
+        return [$ids('estimate_line_item_id'), $ids('combined_into')];
     }
 }
