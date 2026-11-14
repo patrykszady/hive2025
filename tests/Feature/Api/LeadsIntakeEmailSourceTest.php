@@ -174,6 +174,62 @@ it('still asks a stranger whose first message is short on details', function () 
     Queue::assertPushed(SendLeadReplyJob::class, 1);
 });
 
+/*
+ * Richard Harrison, 2026-11-13 (lead 216): a stranger with a phone and no
+ * address. Provisioning made his account from the lead, the ask then found
+ * that account and filed him as "known sender (user)" — he was never asked.
+ */
+it('asks a stranger whose account the lead itself just made', function () {
+    emailIntakeFixture();
+    Queue::fake();
+    Http::fake(['*' => Http::response([], 200)]);
+
+    $this->travelTo(now()->startOfSecond());
+    $this->postJson('/api/v1/leads', emailLeadPayload([
+        'external_id' => sha1('<richard@mail.gmail.com>'),
+        'name' => 'Richard Harrison', 'email' => 'richkvd@example.test', 'phone' => '6305820294', 'address' => null, 'city' => null, 'zip' => null, 'state' => null,
+        'subject' => 'Service Required',
+        'message' => 'Hello, we need a contractor to repair water damage in our basement and replace the drywall. When could someone come out to take a look?',
+        'attachments' => [],
+        'extracted' => ['cc_emails' => []],
+        'in_reply_to' => '<richard@mail.gmail.com>',
+    ]))->assertCreated();
+
+    $lead = Lead::withoutGlobalScopes()->where('external_source', 'crew-email')->latest('id')->firstOrFail();
+    $data = (array) $lead->lead_data;
+    $contact = User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', ['richkvd@example.test'])->first();
+
+    // His contact was made from this lead, in the same second — and he is still a stranger, asked for the address.
+    expect($contact)->not->toBeNull()
+        ->and($lead->user_id)->toBe($contact->id)
+        ->and($contact->created_at->equalTo($lead->created_at))->toBeTrue()
+        ->and($data['missing_info_skipped'] ?? null)->toBeNull()
+        ->and($data['missing_info_requested_at'] ?? null)->not->toBeNull();
+    Queue::assertPushed(SendLeadReplyJob::class, 1);
+});
+
+it('still does not ask someone whose account existed before the lead', function () {
+    emailIntakeFixture();
+    Queue::fake();
+    Http::fake(['*' => Http::response([], 200)]);
+
+    User::query()->create(['first_name' => 'Richard', 'last_name' => 'Harrison', 'email' => 'richkvd@example.test', 'cell_phone' => '6305820294']);
+    $this->travel(5)->minutes();
+
+    $this->postJson('/api/v1/leads', emailLeadPayload([
+        'external_id' => sha1('<richard-again@mail.gmail.com>'),
+        'name' => 'Richard Harrison', 'email' => 'richkvd@example.test', 'phone' => '6305820294', 'address' => null, 'city' => null, 'zip' => null, 'state' => null,
+        'subject' => 'Service Required',
+        'message' => 'Hello again, we still need someone to repair the water damage in our basement and replace the drywall this month.',
+        'attachments' => [],
+        'extracted' => ['cc_emails' => []],
+    ]))->assertCreated();
+
+    $data = (array) Lead::withoutGlobalScopes()->where('external_source', 'crew-email')->latest('id')->firstOrFail()->lead_data;
+    expect($data['missing_info_skipped'])->toBe('known sender (user)');
+    Queue::assertNotPushed(SendLeadReplyJob::class);
+});
+
 it('only fetches files from the site it takes leads from', function () {
     emailIntakeFixture();
     Storage::fake('files');

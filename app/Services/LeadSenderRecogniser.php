@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\EmailMessage;
 use App\Models\User;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -23,14 +24,21 @@ use Illuminate\Support\Facades\DB;
  *  - timeline   the address is already in the project email timeline
  *               (email_messages placed on a project or client): we have
  *               corresponded about a job with it before.
+ *
+ * Asked about a lead already on file, only what existed before the lead
+ * counts ($knownBefore). Richard Harrison, 2026-11-13 (lead 216): a stranger
+ * with a phone and no address; the lead's own provisioning made his account,
+ * the missing-info ask then found that account, called him "known sender
+ * (user)", and he was never asked for the address.
  */
 class LeadSenderRecogniser
 {
     /**
      * @param  list<string>  $otherEmails  the To and CC addresses on the email
+     * @param  CarbonInterface|null  $knownBefore  only accounts and timeline rows made before this moment count — the lead's own arrival
      * @return array{user: ?User, known: bool, via: ?string}
      */
-    public function recognise(?string $fromEmail, array $otherEmails = []): array
+    public function recognise(?string $fromEmail, array $otherEmails = [], ?CarbonInterface $knownBefore = null): array
     {
         $from = mb_strtolower(trim((string) $fromEmail));
 
@@ -38,7 +46,9 @@ class LeadSenderRecogniser
             return ['user' => null, 'known' => false, 'via' => null];
         }
 
-        $user = User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [$from])->first();
+        $before = fn ($query) => $query->when($knownBefore !== null, fn ($q) => $q->where($q->qualifyColumn('created_at'), '<', $knownBefore));
+
+        $user = User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [$from])->tap($before)->first();
 
         if ($user) {
             return ['user' => $user, 'known' => true, 'via' => 'user'];
@@ -53,7 +63,8 @@ class LeadSenderRecogniser
         if ($others->isNotEmpty()) {
             $household = User::withoutGlobalScopes()
                 ->whereIn(DB::raw('LOWER(email)'), $others->all())
-                ->whereHas('clients')
+                ->tap($before)
+                ->whereHas('clients', $before)
                 ->exists();
 
             if ($household) {
@@ -62,6 +73,7 @@ class LeadSenderRecogniser
         }
 
         $placed = EmailMessage::query()
+            ->tap($before)
             ->where(fn ($q) => $q->whereNotNull('project_id')->orWhereNotNull('client_id'))
             ->where(fn ($q) => $q->whereRaw('LOWER(from_email) = ?', [$from])
                 ->orWhere('to', 'like', '%"'.$from.'"%')

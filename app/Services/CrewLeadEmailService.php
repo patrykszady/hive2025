@@ -1343,7 +1343,8 @@ TXT;
     protected function whyNotToAsk(Lead $lead, array $data, string $email, array $base): ?string
     {
         $others = array_merge((array) ($data['cc_emails'] ?? []), (array) data_get($base, 'recipients.to', []), (array) data_get($base, 'recipients.cc', []));
-        $known = app(LeadSenderRecogniser::class)->recognise($email, $others);
+        // Known before this lead arrived: the account its own provisioning just made is not "someone we know" (lead 216, 2026-11-13).
+        $known = app(LeadSenderRecogniser::class)->recognise($email, $others, $lead->created_at);
 
         if ($known['known']) {
             return 'known sender ('.$known['via'].')';
