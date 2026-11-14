@@ -63,14 +63,75 @@
             pendingAnswer: null, // call log id to answer as soon as the client is ready
             connecting: null,
             placing: false,      // a Call tap in flight — a second tap within 4 s is ignored
+            ringTimer: null,
+            signOutTimer: null,
 
-            async init() {
+            // Signed out of Telnyx while idle (2026-11-14): a browser signed in with the
+            // person's calling login took the ring itself and Telnyx never woke their iPhone
+            // (call 3126). Rings come from Hive instead (TeamPhoneRinging), and the browser
+            // signs in only to answer or place a call — so the phone and the computer both ring.
+            init() {
                 this.readUrl();
                 document.addEventListener('livewire:navigated', () => this.readUrl());
-                await this.connect();
+                window.Echo?.private('App.Models.User.{{ auth()->id() }}').listen('.team-phone.ringing', (event) => this.onServerRing(event));
             },
 
-            destroy() { this.client?.disconnect(); },
+            destroy() {
+                window.Echo?.private('App.Models.User.{{ auth()->id() }}').stopListening('.team-phone.ringing');
+                clearTimeout(this.ringTimer); clearTimeout(this.signOutTimer);
+                this.signOut();
+            },
+
+            // Signed in and ready to ring, or false when it could not be (the notice says why).
+            async signIn() {
+                clearTimeout(this.signOutTimer);
+                if (this.client && this.ready) { return true; }
+                await this.connect();
+                if (! this.client) { return false; }
+                const started = Date.now();
+                while (! this.ready) {
+                    if (! this.client || Date.now() - started > 10000) { this.notice = this.notice || 'Calling could not sign in — try again.'; return false; }
+                    await new Promise((resolve) => setTimeout(resolve, 100));
+                }
+                return true;
+            },
+
+            signOut() {
+                try { this.client?.disconnect(); } catch (e) {}
+                this.client = null; this.ready = false; this.connecting = null;
+            },
+
+            // Signed out again once nothing is going on here: no call, nothing being placed or answered.
+            signOutWhenIdle(delay = 3000) {
+                clearTimeout(this.signOutTimer);
+                this.signOutTimer = setTimeout(() => {
+                    if (! this.call && ! this.dialing && ! this.incoming?.webrtc && ! this.outboundRequestedAt) { this.signOut(); }
+                }, delay);
+            },
+
+            // Hive says a call is ringing this person: show it here as well as on their phone.
+            onServerRing(event) {
+                const id = parseInt(event?.call_log_id, 10);
+                if (! id || this.call || this.dialing || this.incoming) { return; }
+                this.incoming = { id, name: event.name || 'Incoming call', internal: event.kind === 'internal', crew: !! event.crew, webrtc: null };
+                try { navigator.vibrate?.([200, 100, 200]); } catch (e) {}
+                this.watchRing(id);
+            },
+
+            // The card stays while Hive says the call still rings this person, and goes once it
+            // was answered on another device, went to voicemail, or the caller hung up.
+            watchRing(id) {
+                clearTimeout(this.ringTimer);
+                const check = async () => {
+                    if (this.incoming?.id !== id || this.incoming?.webrtc) { return; }
+                    let ring = null;
+                    try { ring = await $wire.ringing(id); } catch (e) {}
+                    if (this.incoming?.id !== id || this.incoming?.webrtc) { return; }
+                    if (ring && ! ring.ok && ! this.dialing) { this.incoming = null; return; }
+                    this.ringTimer = setTimeout(check, 2000);
+                };
+                this.ringTimer = setTimeout(check, 2000);
+            },
 
             async connect() {
                 if (this.connecting) { return this.connecting; }
@@ -165,12 +226,12 @@
 
             async showServerRing(callLogId) {
                 const ring = await $wire.ringing(callLogId);
-                if (ring.ok) { this.incoming = { id: callLogId, name: ring.name, internal: true, crew: !! ring.crew, webrtc: null }; }
+                if (ring.ok) { this.incoming = { id: callLogId, name: ring.name, internal: ! ring.business, crew: !! ring.crew, webrtc: null }; this.watchRing(callLogId); }
                 else { this.notice = 'That call has ended.'; }
             },
 
             async flushPendingAnswer() {
-                if (! this.pendingAnswer || ! this.ready) { return; }
+                if (! this.pendingAnswer) { return; }
                 const id = this.pendingAnswer; this.pendingAnswer = null;
                 // The push's Answer opened Hive: the mic prompt comes first; a refusal
                 // leaves the ring banner up so Answer can be pressed again once allowed.
@@ -181,13 +242,16 @@
             // Ask Hive to ring this login into the waiting call; the ring is
             // answered automatically (X-Hive-Outbound-Call) when it arrives.
             async answerFromServer(callLogId, attempt = 0) {
-                this.outboundRequestedAt = Date.now();
                 this.status = 'Connecting…'; this.dialing = this.incoming?.name || 'back';
+                // Signed in first: the ring Hive sends next must find this browser.
+                if (! await this.signIn()) { this.dialing = null; return; }
+                this.outboundRequestedAt = Date.now();
                 const result = await $wire.answer(callLogId);
                 if (result.ok) { this.incoming = null; return; }
                 if (result.error === 'not_ready' && attempt < 4) { setTimeout(() => this.answerFromServer(callLogId, attempt + 1), 1200); return; }
                 this.outboundRequestedAt = 0; this.dialing = null; this.incoming = null;
                 this.notice = result.error || 'That call has ended.';
+                this.signOutWhenIdle();
             },
 
             onNotification(notification) {
@@ -218,6 +282,7 @@
                 }
 
                 if (call.state === 'active') {
+                    clearTimeout(this.signOutTimer);
                     this.call = call; this.incoming = null; this.dialing = null; this.status = 'Connected';
                     // Belt and braces for the remote audio: attach the stream to our element
                     // ourselves and start it, in case the SDK's remoteElement did not.
@@ -232,6 +297,9 @@
                     if (this.call?.id === call.id) { this.call = null; this.muted = false; this.status = ''; this.notice = 'Call ended'; setTimeout(() => { if (this.notice === 'Call ended') this.notice = null; }, 4000); }
                     if (this.incoming?.webrtc?.id === call.id) { this.incoming = null; }
                     if (this.dialing && ! this.call) { this.dialing = null; }
+                    // Back to signed out, so the next call wakes the phone again.
+                    this.outboundRequestedAt = 0;
+                    this.signOutWhenIdle(1500);
                 }
             },
 
@@ -240,11 +308,11 @@
                 if (this.call || this.dialing || this.placing) { this.notice = 'You are already on a call — hang up first.'; return; }
                 this.placing = true; setTimeout(() => { this.placing = false; }, 4000);
                 if (! await this.ensureMicrophone()) { this.placing = false; return; }
-                await this.connect();
+                if (! await this.signIn()) { this.placing = false; return; }
                 this.outboundRequestedAt = Date.now();
                 this.status = 'Ringing your Hive…';
                 const result = await $wire.callUser(userId);
-                if (! result.ok) { this.outboundRequestedAt = 0; this.dialing = null; this.notice = result.error || 'The call could not be placed'; return; }
+                if (! result.ok) { this.outboundRequestedAt = 0; this.dialing = null; this.notice = result.error || 'The call could not be placed'; this.signOutWhenIdle(); return; }
                 this.dialing = result.name; this.status = 'Ringing ' + result.name + ' in Hive…';
             },
 
@@ -252,11 +320,11 @@
                 if (this.call || this.dialing || this.placing) { this.notice = 'You are already on a call — hang up first.'; return; }
                 this.placing = true; setTimeout(() => { this.placing = false; }, 4000);
                 if (! await this.ensureMicrophone()) { this.placing = false; return; }
-                await this.connect();
+                if (! await this.signIn()) { this.placing = false; return; }
                 this.outboundRequestedAt = Date.now();
                 this.status = 'Ringing your Hive…';
                 const result = await $wire.callCrew();
-                if (! result.ok) { this.outboundRequestedAt = 0; this.dialing = null; this.notice = result.error || 'The call could not be placed'; return; }
+                if (! result.ok) { this.outboundRequestedAt = 0; this.dialing = null; this.notice = result.error || 'The call could not be placed'; this.signOutWhenIdle(); return; }
                 this.dialing = result.name; this.status = 'Ringing the crew in Hive…';
             },
 
@@ -269,11 +337,12 @@
             },
             decline() {
                 const ring = this.incoming; if (! ring) { return; }
-                this.incoming = null;
+                // A business call keeps ringing the phone and the cell: only this card goes.
+                this.incoming = null; clearTimeout(this.ringTimer);
                 if (ring.webrtc) { try { ring.webrtc.hangup(); } catch (e) {} }
                 if (ring.internal && ring.id) { $wire.decline(ring.id); }
             },
-            hangup() { this.call?.hangup(); this.dialing = null; this.outboundRequestedAt = 0; },
+            hangup() { this.call?.hangup(); this.dialing = null; this.outboundRequestedAt = 0; this.signOutWhenIdle(1500); },
             toggleMute() { if (! this.call) { return; } this.muted ? this.call.unmuteAudio() : this.call.muteAudio(); this.muted = ! this.muted; },
         }));
     </script>

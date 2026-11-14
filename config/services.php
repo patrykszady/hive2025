@@ -242,6 +242,10 @@ return [
         // reaching the iPhone), and with the cell quiet the caller went to
         // voicemail. Off = the cell rings, with the app alongside, as before.
         'app_only_ring' => (bool) env('TELNYX_APP_ONLY_RING', false),
+        // A browser on a local copy (APP_ENV=local) does not sign in with the
+        // live calling logins it shares with production, or it takes the real
+        // calls (call 3126, 2026-11-14). True lets it, to try calling locally.
+        'team_phone_on_local' => (bool) env('TELNYX_TEAM_PHONE_ON_LOCAL', false),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
         // How long a click-to-call target rings before we give up. Carriers

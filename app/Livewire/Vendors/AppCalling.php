@@ -33,6 +33,10 @@ class AppCalling extends Component
      */
     public function token(): array
     {
+        if (! app(AppVoiceCredentials::class)->browserMaySignIn()) {
+            return ['ok' => false, 'error' => 'Calling stays off in the browser on this local copy: it shares the live calling login, and a signed-in tab here takes real calls from the phone. Set TELNYX_TEAM_PHONE_ON_LOCAL=true to try it anyway.'];
+        }
+
         try {
             return ['ok' => true, 'token' => app(AppVoiceCredentials::class)->tokenFor(auth()->user())];
         } catch (\Throwable $exception) {

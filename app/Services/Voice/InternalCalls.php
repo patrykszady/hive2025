@@ -172,6 +172,12 @@ class InternalCalls
         SendInternalCallPush::dispatch($callLog->id);
         InternalCallTimeout::dispatch($callLog->id)->delay(now()->addSeconds(self::RING_SECONDS));
 
+        // Their browsers ring from Hive: signed out of Telnyx until Answer, so the
+        // ring to their login always wakes their iPhone too (call 3126, 2026-11-14).
+        foreach (array_keys($calleeUris) as $calleeId) {
+            \App\Events\TeamPhoneRinging::announce((int) $calleeId, (int) $callLog->id, self::displayName($caller), 'internal', $crew);
+        }
+
         Log::channel('telnyx')->info('Internal call started', ['call_log_id' => $callLog->id, 'caller' => $caller->id, 'callees' => array_keys($calleeUris), 'crew' => $crew]);
 
         return ['ok' => true, 'error' => null, 'call_log' => $callLog];

@@ -47,6 +47,20 @@ class AppVoiceCredentials
     }
 
     /**
+     * Whether a browser here may sign in with a person's calling login. Not
+     * on a local copy: dev and production share one Telnyx account and so one
+     * login per person (tagFor()), and a localhost tab signed in with it takes
+     * the live calls — Telnyx rings the browser and never wakes the phone
+     * (call 3126, 2026-11-14: the iPhone app stayed silent while a dev tab on
+     * estimates/296 rang, and answering there would have reached the dev
+     * server). TELNYX_TEAM_PHONE_ON_LOCAL=true allows it, to try calling locally.
+     */
+    public function browserMaySignIn(): bool
+    {
+        return ! app()->environment('local') || (bool) config('services.telnyx.team_phone_on_local');
+    }
+
+    /**
      * Whether "direct dial" (the app's own Telnyx SDK places the call,
      * parked at Telnyx rather than ringing the person's phone first) is
      * configured and turned on. See config('services.telnyx.direct_dial_enabled').

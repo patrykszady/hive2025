@@ -5,18 +5,23 @@ namespace App\Livewire;
 use App\Models\CallLog;
 use App\Models\User;
 use App\Services\Voice\AppVoiceCredentials;
+use App\Services\Voice\BrowserAnswer;
 use App\Services\Voice\InternalCalls;
 use Illuminate\Contracts\View\View;
 use Livewire\Component;
 
 /**
- * The Hive phone on every page for GS Construction's team (2026-10-27):
- * the browser signs in with the person's Hive calling login and stays
- * signed in across pages (the layout persists it), so a teammate's call —
- * or a business call, as on /phone-system/app-calling — rings here with
- * Answer and Decline, and "Call Greg" anywhere places a call that stays
- * inside Hive (App\Services\Voice\InternalCalls). Renders nothing for
- * anyone else.
+ * The Hive phone on every page for GS Construction's team (2026-10-27): a
+ * teammate's call or a business call rings here with Answer and Decline,
+ * and "Call Greg" anywhere places a call that stays inside Hive
+ * (App\Services\Voice\InternalCalls). Renders nothing for anyone else.
+ *
+ * Since 2026-11-14 the browser is not signed in to Telnyx while idle: one
+ * signed in with the person's calling login took the ring for it, and
+ * Telnyx then never woke their iPhone (call 3126). Rings arrive from Hive
+ * (App\Events\TeamPhoneRinging, checked with ringing()); Answer signs the
+ * browser in and asks Hive to ring it into the call (answer()), and it signs
+ * out again when the call is over. One login, phone and computer both ring.
  */
 class TeamPhone extends Component
 {
@@ -38,7 +43,8 @@ class TeamPhone extends Component
             && (int) $user->primary_vendor_id === 1
             && ! $user->is_browsing_as_client
             && \App\Support\Team\TeamRoster::isMember($user)
-            && app(AppVoiceCredentials::class)->enabled();
+            && app(AppVoiceCredentials::class)->enabled()
+            && app(AppVoiceCredentials::class)->browserMaySignIn();
     }
 
     /** @return array{ok: bool, token?: string, error?: string} */
@@ -80,13 +86,26 @@ class TeamPhone extends Component
         return ['ok' => $result['ok'], 'error' => $result['error'], 'call_log_id' => $result['call_log']?->id, 'name' => 'the crew'];
     }
 
-    /** @return array{ok: bool, error: ?string} */
+    /**
+     * Answer in this browser: Hive rings this person's login into the call,
+     * and the browser — signed in just now — answers that ring by itself. A
+     * teammate's call (InternalCalls) or a business call (BrowserAnswer).
+     *
+     * @return array{ok: bool, error: ?string}
+     */
     public function answer(int $callLogId): array
     {
         abort_unless($this->enabled, 403);
         $callLog = CallLog::find($callLogId);
+        if (! $callLog) {
+            return ['ok' => false, 'error' => 'That call has ended.'];
+        }
 
-        return $callLog ? app(InternalCalls::class)->answer($callLog, auth()->user()) : ['ok' => false, 'error' => 'That call has ended.'];
+        $calls = app(InternalCalls::class);
+
+        return $calls->isCalleeOf($callLog, auth()->user())
+            ? $calls->answer($callLog, auth()->user())
+            : app(BrowserAnswer::class)->answer($callLog, auth()->user());
     }
 
     public function decline(int $callLogId): bool
@@ -97,17 +116,32 @@ class TeamPhone extends Component
         return $callLog ? app(InternalCalls::class)->decline($callLog, auth()->user()) : false;
     }
 
-    /** Who is calling, for the banner a push opened (the SIP ring may have missed this tab). */
+    /**
+     * Who is calling, while the call still rings this person: for the ring
+     * card a push or a TeamPhoneRinging broadcast opened, which asks again
+     * every few seconds and goes once this says no (answered on another
+     * device, gone to voicemail, the caller hung up).
+     *
+     * @return array{ok: bool, name?: string, crew?: bool, business?: bool}
+     */
     public function ringing(int $callLogId): array
     {
         abort_unless($this->enabled, 403);
         $callLog = CallLog::find($callLogId);
         $calls = app(InternalCalls::class);
-        if (! $callLog || ! $calls->isCalleeOf($callLog, auth()->user()) || $calls->hasEnded($callLog)) {
+        if (! $callLog) {
             return ['ok' => false];
         }
 
-        return ['ok' => true, 'name' => InternalCalls::displayName(User::withoutGlobalScopes()->find($callLog->metadata['caller_user_id'] ?? $callLog->user_id)), 'crew' => $calls->isCrew($callLog)];
+        if ($calls->isCalleeOf($callLog, auth()->user())) {
+            return $calls->hasEnded($callLog)
+                ? ['ok' => false]
+                : ['ok' => true, 'name' => InternalCalls::displayName(User::withoutGlobalScopes()->find($callLog->metadata['caller_user_id'] ?? $callLog->user_id)), 'crew' => $calls->isCrew($callLog), 'business' => false];
+        }
+
+        return app(BrowserAnswer::class)->isRinging($callLog, auth()->user())
+            ? ['ok' => true, 'name' => BrowserAnswer::callerName($callLog), 'crew' => false, 'business' => true]
+            : ['ok' => false];
     }
 
     public function render(): View

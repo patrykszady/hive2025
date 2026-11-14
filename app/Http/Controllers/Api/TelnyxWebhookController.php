@@ -1651,9 +1651,10 @@ class TelnyxWebhookController extends Controller
         // was 6–7 s of every inbound pickup (2026-09-17 log review). The
         // hang-up-to-voicemail behaviour is unchanged.
         $vendorOptions = (array) (Vendor::find(1)?->options ?? []);
-        $isAppLeg = ($clientState['leg'] ?? null) === 'app';
+        // The app's leg, or a browser's (BrowserAnswer): both showed who is calling already.
+        $isAppLeg = in_array($clientState['leg'] ?? null, ['app', 'browser'], true);
         if ($isAppLeg || ! (bool) data_get($vendorOptions, 'screening_enabled', true)) {
-            Log::channel('telnyx')->info($isAppLeg ? 'Answered in the app — connecting straight away' : 'Screening off — connecting the answering admin straight away', [
+            Log::channel('telnyx')->info($isAppLeg ? 'Answered in the '.(($clientState['leg'] ?? null) === 'browser' ? 'browser' : 'app').' — connecting straight away' : 'Screening off — connecting the answering admin straight away', [
                 'admin_call_control_id' => $callControlId,
                 'call_log_id' => $callLog->id,
                 'admin_user_id' => $adminUserId,
@@ -4408,6 +4409,14 @@ class TelnyxWebhookController extends Controller
         // screen when the push carried too little (GET /api/app/v1/calls/ringing).
         Cache::put("telnyx_app_ringing:{$person->id}", ['call_log_id' => $callLogId, 'app_call_control_id' => $appCallControlId], now()->addSeconds(self::RING_SECONDS + 10));
         Log::channel('telnyx')->info($cellCallControlId ? 'Ringing the team member\'s app too' : 'Ringing the team member in the app only — their cell stays quiet', ['admin_user_id' => $person->id, 'app_call_control_id' => $appCallControlId, 'call_log_id' => $callLogId]);
+
+        // Their browsers ring from Hive, not from this leg: a browser signed in
+        // with the login would take it and the iPhone would never be woken
+        // (call 3126, 2026-11-14). Answering there rings the browser in
+        // (App\Services\Voice\BrowserAnswer).
+        if ($callLogId) {
+            \App\Events\TeamPhoneRinging::announce((int) $person->id, (int) $callLogId, $callLog ? \App\Services\Voice\BrowserAnswer::callerName($callLog) : (string) ($originalCaller ?? 'Incoming call'), 'business');
+        }
 
         return $appCallControlId;
     }
