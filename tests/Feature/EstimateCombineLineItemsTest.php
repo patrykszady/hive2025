@@ -327,6 +327,30 @@ it('combines from the estimate page: pick the items, name the section', function
         ->assertSee('Demo Bathroom')->assertDontSee('205 sq.ft.');
 });
 
+it('lists the items A to Z by name, items of the same name by trade', function () {
+    $fx = roomsWithSharedItems();
+    $c = $fx['catalog'];
+    combineLine($fx, $fx['laundry'], 'Full Drywall', 2);
+    // Another catalog item called Floor Tile, under Flooring.
+    $fx['catalog']['Vinyl'] = LineItem::withoutGlobalScopes()->create([
+        'name' => 'Floor Tile', 'category' => 'Flooring', 'sub_category' => 'Vinyl', 'unit_type' => 'sq.ft.', 'cost' => 9, 'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]);
+    combineLine($fx, $fx['kitchen'], 'Vinyl', 30, ['name' => 'Floor Tile']);
+    combineLine($fx, $fx['laundry'], 'Vinyl', 12, ['name' => 'Floor Tile']);
+
+    $listed = collect(app(EstimateLineItemCombiner::class)->candidates($fx['estimate']))
+        ->map(fn (array $item) => $item['name'].' ('.$item['category'].')')->all();
+
+    // By trade it read Demolition, Drywall, Flooring, Tiles — Full Drywall before Floor Tile.
+    expect($listed)->toBe(['Demo Bathroom (Demolition)', 'Floor Tile (Flooring)', 'Floor Tile (Tiles)', 'Full Drywall (Drywall)']);
+
+    // The window and its Show picker list them the same way.
+    $window = Livewire::test(EstimateCombineLineItems::class, ['estimate' => $fx['estimate']])->dispatch('openCombineLineItems')->instance();
+
+    expect(array_column($window->shown, 'line_item_id'))->toBe([$c['Demo Bathroom']->id, $fx['catalog']['Vinyl']->id, $c['Floor Tile']->id, $c['Full Drywall']->id])
+        ->and(array_column($window->itemChoices, 'label'))->toBe(['Demo Bathroom — Demolition/Demo', 'Floor Tile — Flooring/Vinyl', 'Floor Tile — Tiles/Floor', 'Full Drywall — Drywall/Install']);
+});
+
 it('shows and combines one catalog item on its own, by its global line item id, never another item of the same name', function () {
     $fx = roomsWithSharedItems();
     $c = $fx['catalog'];

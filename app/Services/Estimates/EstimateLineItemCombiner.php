@@ -44,6 +44,8 @@ class EstimateLineItemCombiner
      * `becomes` is what combining makes of it: one entry per line it turns
      * into — more than one when its sections price it differently.
      *
+     * Listed A to Z by name, as the Combine window shows them.
+     *
      * @return list<array{key: string, line_item_id: int, name: string, category: ?string, sub_category: ?string, unit_type: string, quantity: float, total: float, allowances: float, lines: list<array{id: int, section_id: int, section: string, quantity: float, cost: float, total: float}>, becomes: list<array{quantity: float, cost: float, total: float}>}>
      */
     public function candidates(Estimate $estimate): array
@@ -78,7 +80,8 @@ class EstimateLineItemCombiner
                     ])->values()->all(),
                 ];
             })
-            ->sortBy([['category', 'asc'], ['name', 'asc']])
+            // A to Z by name, whatever the case (2026-11-14); items sharing a name ("Demo" under Flooring and under Kitchen) by trade, then bid.
+            ->sortBy(fn (array $item) => [mb_strtolower($item['name']), mb_strtolower((string) $item['category']), mb_strtolower((string) $item['sub_category']), $item['key']])
             ->values()
             ->all();
     }
