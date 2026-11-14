@@ -64,6 +64,8 @@ class ThreadController extends Controller
 
         $threads = SmsGroupThread::query()
             ->accessibleTo($user)
+            // Team conversations are on the Team tab, as on the website (TeamController).
+            ->textThreads()
             ->with(self::THREAD_RELATIONS)
             ->withCount($this->scheduledMessagesCountRelation())
             ->when($ids !== null, fn ($q) => $q->whereIn('id', $ids))

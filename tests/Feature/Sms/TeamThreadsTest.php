@@ -221,7 +221,9 @@ it('shows the app each member their own side of a team thread, and the app sends
     $data = $this->getJson("/api/app/v1/threads/{$thread->id}/messages")->assertOk()->json('data');
     expect(collect($data)->map(fn ($m) => [$m['body'], $m['direction'], $m['sender_name']])->all())
         ->toBe([['Running late', 'inbound', 'Patryk'], ['No problem', 'outbound', 'Greg']]);
-    expect(collect($this->getJson('/api/app/v1/threads')->assertOk()->json('data'))->firstWhere('id', $thread->id)['title'])->toBe('Patryk');
+    // On the app's Team tab (2026-11-14), not among its text messages — as on the website.
+    expect(collect($this->getJson('/api/app/v1/threads')->assertOk()->json('data'))->pluck('id'))->not->toContain($thread->id)
+        ->and(collect($this->getJson('/api/app/v1/team')->assertOk()->json('data'))->firstWhere('thread_id', $thread->id)['title'])->toBe('Patryk');
 
     $this->postJson("/api/app/v1/threads/{$thread->id}/messages", ['body' => 'On my way'])->assertSuccessful();
     $sent = SmsMessage::query()->where('thread_id', $thread->id)->latest('id')->first();
@@ -294,6 +296,16 @@ it('takes the team from /phone-system: an unticked colleague leaves the roster, 
     Livewire::test(SmsIndex::class)->assertSet('showTeam', false);
     expect(\App\Livewire\TeamPhone::enabledFor($andzelina))->toBeFalse()
         ->and(\App\Livewire\TeamPhone::enabledFor($w['patryk']))->toBeTrue();
+
+    // Call 3126 (2026-11-14): a localhost tab signed in with the live login took the call and the iPhone app never rang.
+    // A local copy's browser stays signed out unless asked to; everywhere else is as before.
+    app()->detectEnvironment(fn () => 'local');
+    expect(\App\Livewire\TeamPhone::enabledFor($w['patryk']))->toBeFalse()
+        ->and(\Livewire\Livewire::test(\App\Livewire\Vendors\AppCalling::class)->instance()->token()['ok'])->toBeFalse();
+    config(['services.telnyx.team_phone_on_local' => true]);
+    expect(\App\Livewire\TeamPhone::enabledFor($w['patryk']))->toBeTrue();
+    config(['services.telnyx.team_phone_on_local' => false]);
+    app()->detectEnvironment(fn () => 'testing');
     expect(app(\App\Services\Voice\InternalCalls::class)->start($w['patryk'], $andzelina)['ok'])->toBeFalse();
 
     // Someone who left the company drops off even when still ticked.

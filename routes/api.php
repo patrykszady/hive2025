@@ -75,6 +75,10 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
         Route::get('me', [AppAuthController::class, 'me'])->name('me');
         Route::post('logout', [AppAuthController::class, 'logout'])->name('logout');
 
+        // The Team tab: Hive-only conversations with teammates, as on the website.
+        Route::get('team', [\App\Http\Controllers\Api\App\V1\TeamController::class, 'index'])->name('team.index');
+        Route::post('team/threads', [\App\Http\Controllers\Api\App\V1\TeamController::class, 'open'])->name('team.threads.open');
+
         Route::get('threads', [AppThreadController::class, 'index'])->name('threads.index');
         Route::post('threads', [AppThreadController::class, 'store'])->name('threads.store');
         Route::get('threads/{thread}', [AppThreadController::class, 'show'])->whereNumber('thread')->name('threads.show');

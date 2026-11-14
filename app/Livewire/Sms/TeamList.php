@@ -63,52 +63,7 @@ class TeamList extends Component
     #[Computed]
     public function rows(): array
     {
-        $user = auth()->user();
-        $teammates = $this->teammates;
-        if (! $user || $teammates->isEmpty()) {
-            return [];
-        }
-
-        $threads = SmsGroupThread::query()
-            ->teamThreads()
-            ->where('vendor_id', $user->vendor->id)
-            ->forTeamMember((int) $user->id)
-            ->with('latestMessage')
-            ->get();
-        $unreadIds = SmsGroupThread::query()
-            ->teamThreads()
-            ->forTeamMember((int) $user->id)
-            ->unreadForUser((int) $user->id)
-            ->pluck('id')
-            ->all();
-
-        $threadFor = function (array $memberIds) use ($threads): ?SmsGroupThread {
-            $wanted = collect($memberIds)->sort()->values()->all();
-
-            return $threads->first(fn (SmsGroupThread $t) => collect($t->memberIds())->sort()->values()->all() === $wanted);
-        };
-        $row = function (string $key, ?int $userId, string $title, bool $isGroup, ?SmsGroupThread $thread) use ($unreadIds): array {
-            $latest = $thread?->latestMessage;
-
-            return [
-                'key' => $key,
-                'user_id' => $userId,
-                'thread_id' => $thread?->id,
-                'title' => $title,
-                'initial' => mb_strtoupper(mb_substr($title, 0, 1)),
-                'preview' => $latest?->text,
-                'at' => $latest?->shown_at,
-                'unread' => $thread && in_array($thread->id, $unreadIds, true),
-                'is_group' => $isGroup,
-            ];
-        };
-
-        $rows = [$row('group', null, $this->groupName(), true, $threadFor($teammates->pluck('id')->push((int) $user->id)->all()))];
-        foreach ($teammates as $mate) {
-            $rows[] = $row('user-'.$mate->id, (int) $mate->id, trim((string) ($mate->nickname ?: $mate->first_name)), false, $threadFor([(int) $user->id, (int) $mate->id]));
-        }
-
-        return $rows;
+        return \App\Support\Team\TeamRows::for(auth()->user());
     }
 
     /** Open (making it on first use) the Hive-only thread with one teammate. */
@@ -135,13 +90,6 @@ class TeamList extends Component
         unset($this->rows);
         $this->selectedThreadId = $thread->id;
         $this->dispatch('threadSelected', threadId: $thread->id)->to(SmsIndex::class);
-    }
-
-    protected function groupName(): string
-    {
-        $vendor = auth()->user()?->vendor;
-
-        return $vendor ? \App\Support\Team\TeamRoster::groupName($vendor) : 'Team';
     }
 
     public function render()
