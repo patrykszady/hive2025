@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\OpenTeamThreadRequest;
+use App\Http\Requests\Api\App\PlaceTeamCallRequest;
 use App\Models\SmsGroupThread;
+use App\Services\Voice\InternalCalls;
 use App\Support\Team\TeamRoster;
 use App\Support\Team\TeamRows;
 use Illuminate\Http\JsonResponse;
@@ -53,5 +55,44 @@ class TeamController extends Controller
         }
 
         return response()->json(['data' => ['id' => $thread->id, 'title' => $title]]);
+    }
+
+    /**
+     * Call a teammate (user_id) or the whole crew (none) inside Hive, as the
+     * website's Team tab does (InternalCalls): Hive rings this person's own
+     * login first, marked X-Hive-Outbound-Call, which the app answers by
+     * itself — the same ring-back as any call it places — then the callee.
+     * Answers in the shape of POST calls, under a handle the app keeps for
+     * the call screen and for a redial from the phone's recent calls.
+     */
+    public function call(PlaceTeamCallRequest $request, InternalCalls $calls): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless(TeamRoster::isMember($user), 403, 'Only the team can call each other in Hive.');
+
+        $teammateId = $request->validated('user_id');
+        if ($teammateId !== null) {
+            $teammate = TeamRoster::teammatesOf($user)->firstWhere('id', (int) $teammateId);
+            abort_unless($teammate !== null, 403, 'That person is not on your team.');
+            $result = $calls->start($user, $teammate);
+            $name = InternalCalls::displayName($teammate);
+        } else {
+            $result = $calls->startCrew($user);
+            $name = TeamRoster::groupName($user->vendor);
+        }
+
+        if (! $result['ok']) {
+            return response()->json(['message' => $result['error']], 422);
+        }
+
+        $handle = 'hive-team:'.($teammateId !== null ? (int) $teammateId : 'crew');
+
+        return response()->json([
+            'call_log_id' => $result['call_log']->id,
+            'to' => $handle,
+            'targets' => [$handle],
+            'ring' => 'app',
+            'display_name' => $name,
+        ], 201);
     }
 }

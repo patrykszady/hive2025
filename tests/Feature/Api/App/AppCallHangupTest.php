@@ -182,10 +182,11 @@ it('only lets the person who placed the call end it', function () {
 
 it('refuses a call the app does not place through Hive, and an unknown reason', function () {
     fakeTelnyxHangups();
-    $internal = appPlacedCall($this->member, [], ['type' => 'internal_call']);
+    // A call to a teammate inside Hive is the app's to end since 2026-11-14 (the Team tab; AppTeamTest) — anything else is not.
+    $other = appPlacedCall($this->member, [], ['type' => 'transfer']);
     $call = appPlacedCall($this->member);
 
-    $this->postJson("/api/app/v1/calls/{$internal->id}/hangup")
+    $this->postJson("/api/app/v1/calls/{$other->id}/hangup")
         ->assertUnprocessable()
         ->assertJson(['message' => 'This call cannot be ended from the app.']);
     $this->postJson("/api/app/v1/calls/{$call->id}/hangup", ['reason' => 'because'])

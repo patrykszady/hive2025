@@ -78,6 +78,7 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
         // The Team tab: Hive-only conversations with teammates, as on the website.
         Route::get('team', [\App\Http\Controllers\Api\App\V1\TeamController::class, 'index'])->name('team.index');
         Route::post('team/threads', [\App\Http\Controllers\Api\App\V1\TeamController::class, 'open'])->name('team.threads.open');
+        Route::post('team/calls', [\App\Http\Controllers\Api\App\V1\TeamController::class, 'call'])->middleware('throttle:30,1')->name('team.calls.store');
 
         Route::get('threads', [AppThreadController::class, 'index'])->name('threads.index');
         Route::post('threads', [AppThreadController::class, 'store'])->name('threads.store');

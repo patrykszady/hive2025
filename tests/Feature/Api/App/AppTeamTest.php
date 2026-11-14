@@ -79,3 +79,60 @@ it('keeps team conversations off the Messages list, as on the website', function
 
     expect($ids)->toContain($text->id)->not->toContain($pair->id);
 });
+
+/** Calling in Hive switched on, with a calling login for each of the team. */
+function appTeam_calling(array $people): void
+{
+    config([
+        'services.telnyx.api_key' => 'test-api-key',
+        'services.telnyx.from' => '+12247354200',
+        'services.telnyx.connection_id' => 'call-control-app',
+        'services.telnyx.app_connection_id' => 'app-connection',
+        'services.telnyx.public_url' => 'https://example.com',
+    ]);
+    foreach ($people as $person) {
+        \App\Models\UserVoiceCredential::factory()->create(['user_id' => $person->id, 'sip_username' => 'gencred'.strtolower($person->first_name)]);
+    }
+    \Illuminate\Support\Facades\Bus::fake();
+    \Illuminate\Support\Facades\Http::fake([
+        'api.telnyx.com/v2/calls' => \Illuminate\Support\Facades\Http::response(['data' => ['call_control_id' => 'cc-'.uniqid(), 'call_session_id' => 'sess-1', 'call_leg_id' => 'leg-1']], 200),
+        'api.telnyx.com/*' => \Illuminate\Support\Facades\Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+}
+
+it('calls a teammate in Hive from the Team tab, ringing the caller\'s own app first to answer by itself', function () {
+    appTeam_calling([$this->patryk, $this->greg, $this->cezary]);
+
+    $placed = $this->postJson('/api/app/v1/team/calls', ['user_id' => $this->greg->id])->assertCreated()->json();
+
+    $callLog = \App\Models\CallLog::findOrFail($placed['call_log_id']);
+    expect($placed)->toMatchArray(['to' => 'hive-team:'.$this->greg->id, 'targets' => ['hive-team:'.$this->greg->id], 'ring' => 'app', 'display_name' => 'Greg'])
+        ->and($callLog->metadata['type'])->toBe(\App\Services\Voice\InternalCalls::TYPE)
+        ->and($callLog->metadata['target_user_ids'])->toBe([$this->greg->id]);
+    \Illuminate\Support\Facades\Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && $request['to'] === 'sip:gencredpatryk@sip.telnyx.com'
+        && collect($request['custom_headers'])->firstWhere('name', 'X-Hive-Outbound-Call')['value'] === (string) $callLog->id);
+
+    // The app can end it, as any call it placed.
+    $this->postJson("/api/app/v1/calls/{$callLog->id}/hangup", ['reason' => 'local-hangup'])->assertOk()->assertJsonPath('call_log_id', $callLog->id);
+});
+
+it('calls the whole crew in Hive from the Team tab', function () {
+    appTeam_calling([$this->patryk, $this->greg, $this->cezary]);
+
+    $placed = $this->postJson('/api/app/v1/team/calls', [])->assertCreated()->json();
+
+    expect($placed)->toMatchArray(['to' => 'hive-team:crew', 'display_name' => 'GS Construction Crew'])
+        ->and(collect(\App\Models\CallLog::findOrFail($placed['call_log_id'])->metadata['target_user_ids'])->sort()->values()->all())
+        ->toBe(collect([$this->greg->id, $this->cezary->id])->sort()->values()->all());
+});
+
+it('calls nobody who is not on the team, and says why a call cannot be placed', function () {
+    appTeam_calling([$this->patryk]);
+    $outsider = User::factory()->create(['first_name' => 'Out', 'primary_vendor_id' => 1]);
+
+    $this->postJson('/api/app/v1/team/calls', ['user_id' => $outsider->id])->assertForbidden();
+    // Greg has no calling login yet.
+    $this->postJson('/api/app/v1/team/calls', ['user_id' => $this->greg->id])->assertStatus(422)->assertJsonStructure(['message']);
+    expect(\App\Models\CallLog::query()->where('user_id', $this->patryk->id)->where('status', '!=', \App\Models\CallLog::STATUS_FAILED)->count())->toBe(0);
+});

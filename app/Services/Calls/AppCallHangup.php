@@ -28,7 +28,8 @@ use Illuminate\Support\Str;
 class AppCallHangup
 {
     /** The CallLog metadata types the app places itself — see ClickToCall and DirectDialStarter. */
-    public const TYPES = ['direct_dial', 'click_to_call', 'click_to_call_multi'];
+    /** internal_call: a call to a teammate inside Hive, placed from the app's Team tab (InternalCalls). */
+    public const TYPES = ['direct_dial', 'click_to_call', 'click_to_call_multi', 'internal_call'];
 
     /** Whether this person placed this call. */
     public function placedBy(User $user, CallLog $callLog): bool
@@ -36,7 +37,7 @@ class AppCallHangup
         return $callLog->direction === 'outgoing' && (int) $callLog->user_id === (int) $user->id;
     }
 
-    /** Whether this is a call the app places through Hive (a click-to-call or a direct dial). */
+    /** Whether this is a call the app places through Hive (a click-to-call, a direct dial, or a call to a teammate). */
     public function supports(CallLog $callLog): bool
     {
         return in_array($callLog->metadata['type'] ?? null, self::TYPES, true);
