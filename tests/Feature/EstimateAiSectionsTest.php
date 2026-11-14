@@ -930,6 +930,24 @@ it('keeps a combined line put in a drafted section when that section is drafted 
     expect(linesOf($kitchen->fresh()))->toBe([['Baseboard Install', 100.0]]);
 });
 
+it('drafts every quantity as the nearest whole number, never less than one', function () {
+    [$fx, $component] = sectionsGenerator();
+    $c = $fx['catalog'];
+    $component->call('addSectionRow');
+    $component->set('sectionRows.'.(count($component->get('sectionRows')) - 1).'.name', 'Living Room');
+    claudeDrafts([['S1', 'Living Room', 'Floor and trim.', [[$c['Floor Tile'], 437.9], [$c['Baseboard Install'], 115.5], [$c['Full Drywall'], 0.3]]]]);
+    $component->call('generate');
+
+    $living = sectionNamed($fx, 'Living Room');
+    $tile = EstimateLineItem::query()->where('section_id', $living->id)->where('name', 'Floor Tile')->sole();
+
+    expect(linesOf($living))->toBe([['Floor Tile', 438.0], ['Baseboard Install', 116.0], ['Full Drywall', 1.0]])
+        ->and((float) $tile->total)->toBe(round(438 * (float) $c['Floor Tile']->cost, 2))
+        // The draft remembers the whole number it put on the estimate, so the rounding never reads as the estimator's correction.
+        ->and(collect(EstimateAiDraft::sole()->drafted_items)->pluck('quantity')->all())->toEqual([438, 116, 1])
+        ->and(collect($component->get('generatedItems'))->pluck('quantity')->all())->toBe([438.0, 116.0, 1.0]);
+});
+
 it('takes a combined line made only of drafted lines with a draft discarded in the review', function () {
     [$fx, $component] = sectionsGenerator();
     $c = $fx['catalog'];

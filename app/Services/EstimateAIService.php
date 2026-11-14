@@ -457,7 +457,9 @@ class EstimateAIService
 
     /**
      * One drafted item onto the estimate, at the catalog's price and with the
-     * catalog's own text. Null when the catalog item no longer exists.
+     * catalog's own text, its quantity the nearest whole number (never less
+     * than one — 2026-11-14: "437.9 sq.ft." of hardwood is quoted as 438).
+     * Null when the catalog item no longer exists.
      *
      * @param  array<string, mixed>  $item
      */
@@ -469,7 +471,7 @@ class EstimateAIService
             return null;
         }
 
-        $quantity = is_numeric($item['quantity'] ?? null) && (float) $item['quantity'] > 0 ? (float) $item['quantity'] : 1.0;
+        $quantity = is_numeric($item['quantity'] ?? null) && (float) $item['quantity'] > 0 ? max(1.0, round((float) $item['quantity'])) : 1.0;
         // The catalog price, always — never a figure the model wrote.
         $cost = (float) $lineItem->cost;
 
