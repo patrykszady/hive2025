@@ -302,8 +302,8 @@ it('combines from the estimate page: pick the items, name the section', function
         ->assertSee('Demo Bathroom')->assertSee('$1,700.00')
         ->assertDontSee('Full Drywall')->assertDontSee('Roof Shingles');
 
-    // Nothing ticked, nothing named.
-    $component->call('combine')->assertHasErrors(['selected', 'sectionName']);
+    // Nothing ticked, nowhere picked.
+    $component->call('combine')->assertHasErrors(['selected', 'into']);
     expect(EstimateSection::query()->where('estimate_id', $fx['estimate']->id)->count())->toBe(3);
 
     // The section name follows the picks until the estimator types one: one trade, then several.
@@ -390,7 +390,7 @@ it('puts the combined lines in a section already on the estimate, picked from th
     $component = Livewire::test(EstimateCombineLineItems::class, ['estimate' => $fx['estimate']])
         ->dispatch('openCombineLineItems', only: $c['Floor Tile']->id)
         // One combobox: the suggested new section to start with, then every section, numbered as the estimate numbers them.
-        ->assertSet('into', 'new')
+        ->assertSet('into', 'new:Tiles')
         ->assertSee('New section at the end of the estimate')
         ->assertSeeHtml('wire:key="combine-into-'.$fx['section']->id.'"')->assertSee('Section 1 on this estimate')
         ->assertSeeHtml('wire:key="combine-into-'.$fx['kitchen']->id.'"')->assertSee('Section 2 on this estimate')
@@ -401,12 +401,26 @@ it('puts the combined lines in a section already on the estimate, picked from th
     $component->set('into', '999999')->call('combine')->assertHasErrors(['into' => 'in']);
     expect(EstimateLineItem::query()->where('estimate_id', $fx['estimate']->id)->where('line_item_id', $c['Floor Tile']->id)->count())->toBe(3);
 
-    // A name typed and created in line, then the kitchen picked instead: the pick wins, and its name is not suggested over.
-    $component->set('into', (string) $fx['kitchen']->id)->set('sectionName', '  Flooring ')->call('newSection')
-        ->assertSet('into', 'new')->assertSet('sectionName', 'Flooring')->assertSee('Flooring');
+    // A name typed in the select's search and created in line becomes the new section's; the search empties.
+    $component->set('into', (string) $fx['kitchen']->id)->set('search', '  Flooring ')->call('newSection')
+        // The name is in the value, so the select shows the new name at once rather than the suggestion it replaced.
+        ->assertSet('into', 'new:Flooring')->assertSet('sectionName', 'Flooring')->assertSet('search', '')->assertSee('Flooring');
+    // Nothing typed creates nothing; a name too long is refused, the one before it kept.
+    $component->call('newSection')->assertSet('sectionName', 'Flooring')
+        ->set('search', str_repeat('x', 61))->call('newSection')->assertHasErrors('sectionName')->assertSet('sectionName', 'Flooring');
+    // 2026-11-14: bound to the name, the select wrote its own value "new" into it and a section called "new" was made.
+    // The search is its own property; the name is never bound to anything the select can write.
+    $component->assertSeeHtml('wire:model="search"')->assertDontSeeHtml('wire:model="sectionName"');
+
+    // A name typed in the search but never chosen is not guessed at: Combine asks, and nothing moves.
+    $component->set('search', 'Floo')->call('combine')->assertHasErrors('into')->assertSee('You typed &quot;Floo&quot;', false);
+    expect(EstimateLineItem::query()->where('estimate_id', $fx['estimate']->id)->where('line_item_id', $c['Floor Tile']->id)->count())->toBe(3);
+    $component->set('search', '');
+
+    // Then the kitchen picked instead: the pick wins, and its name is not suggested over.
     $component->set('into', (string) $fx['kitchen']->id)->set('sectionName', 'Kitchen')
         ->set('selected', [(string) $c['Floor Tile']->id])->assertSet('sectionName', 'Kitchen')
-        ->assertDontSee('New section at the end of the estimate');
+        ->assertSee('At the end of that section');
 
     // Into the kitchen, one of the rooms the tile comes from: no new section.
     $component->call('combine')->assertHasNoErrors();

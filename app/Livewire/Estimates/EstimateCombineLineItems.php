@@ -33,10 +33,19 @@ class EstimateCombineLineItems extends Component
     /** @var list<string> The items ticked to combine, by the key EstimateLineItemCombiner::candidates() gives each. */
     public array $selected = [];
 
+    /** The new section's name: suggested from what is ticked, or typed in the select's search and created. */
     public string $sectionName = '';
 
-    /** Where the combined lines go, picked from one dropdown: 'new' (a section named $sectionName) or the id of a section already on the estimate (2026-11-14). */
-    public string $into = 'new';
+    /**
+     * Where the combined lines go, picked from one select (2026-11-14):
+     * 'new:<name>' (a new section named $sectionName — the name is in the
+     * value so the select shows a renamed one at once), the id of a section
+     * already on the estimate, or '' while nothing is picked.
+     */
+    public string $into = '';
+
+    /** What is typed in the select's search: a section to find, or a new one's name to create. Never the name itself — the select writes its own value into whatever it is bound to. */
+    public string $search = '';
 
     /**
      * One catalog item (its global line_item id) to show and combine on its
@@ -58,7 +67,7 @@ class EstimateCombineLineItems extends Component
     public function openModal(array $tick = [], ?int $only = null): void
     {
         $this->authorize('update', $this->estimate);
-        $this->reset('selected', 'sectionName', 'only', 'into');
+        $this->reset('selected', 'sectionName', 'only', 'into', 'search');
         $this->resetErrorBag();
         unset($this->candidates, $this->shown, $this->itemChoices, $this->sections);
 
@@ -98,14 +107,27 @@ class EstimateCombineLineItems extends Component
 
         $suggestions = collect($this->candidates)->pluck('category')->filter()->push('Throughout')->all();
 
-        // A section already picked from the list keeps its name in the box.
-        if ($this->into === 'new' && ($this->sectionName === '' || in_array($this->sectionName, $suggestions, true))) {
+        // A section already picked from the list, or a name typed and created, stays.
+        if (($this->into === '' || $this->intoNew()) && ($this->sectionName === '' || in_array($this->sectionName, $suggestions, true))) {
             $this->sectionName = match ($categories->count()) {
                 0 => '',
                 1 => (string) $categories->first(),
                 default => 'Throughout',
             };
+            $this->into = $this->sectionName !== '' ? self::newValue($this->sectionName) : '';
         }
+    }
+
+    /** The select's value for the new section of that name. */
+    public static function newValue(string $name): string
+    {
+        return 'new:'.$name;
+    }
+
+    /** Whether a new section is picked, rather than one of the estimate's. */
+    protected function intoNew(): bool
+    {
+        return str_starts_with($this->into, 'new:');
     }
 
     /**
@@ -172,12 +194,25 @@ class EstimateCombineLineItems extends Component
             ->all();
     }
 
-    /** The combobox's 'New section "…"' row: the combined lines go in a new section of the name typed there. */
+    /** The select's 'New section "…"' row: the combined lines go in a new section of the name typed in its search. */
     public function newSection(): void
     {
-        $this->sectionName = trim($this->sectionName);
-        $this->into = 'new';
+        $name = trim($this->search);
         $this->resetErrorBag(['into', 'sectionName']);
+
+        if ($name === '') {
+            return;
+        }
+
+        if (mb_strlen($name) > 60) {
+            $this->addError('sectionName', 'A section name can be 60 characters at most.');
+
+            return;
+        }
+
+        $this->sectionName = $name;
+        $this->into = self::newValue($name);
+        $this->search = '';
     }
 
     /**
@@ -201,15 +236,25 @@ class EstimateCombineLineItems extends Component
     public function combine(EstimateLineItemCombiner $combiner): void
     {
         $this->authorize('update', $this->estimate);
-        $existing = $this->into !== 'new';
+        // A name typed in the select's search but never chosen — the list only closes on a click outside it. Never guessed at
+        // ("Kit" may be half of Kitchen): the estimator is asked to choose (2026-11-14).
+        $typed = trim($this->search);
+        if ($typed !== '') {
+            $this->addError('into', 'You typed "'.Str::limit($typed, 40).'" — choose New section "'.Str::limit($typed, 40).'", or a section from the list.');
+
+            return;
+        }
+
+        $existing = ! $this->intoNew();
         $this->validate(
             [
                 'selected' => 'required|array|min:1',
-                'into' => ['required', Rule::in(['new', ...array_map('strval', array_column($this->sections, 'id'))])],
+                'into' => ['required', Rule::in([...($existing ? [] : [$this->into]), ...array_map('strval', array_column($this->sections, 'id'))])],
                 'sectionName' => $existing ? 'nullable|string|max:60' : 'required|string|max:60',
             ],
             [
                 'selected.required' => 'Tick at least one item to combine.',
+                'into.required' => 'Pick a section, or type a new one\'s name and choose New section.',
                 'sectionName.required' => 'Name the section the combined items go in.',
                 'into.in' => 'That section can no longer take combined items. Pick another.',
             ],

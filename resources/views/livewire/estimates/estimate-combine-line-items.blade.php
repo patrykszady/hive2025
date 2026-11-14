@@ -64,28 +64,32 @@
                 </flux:checkbox.group>
                 <flux:error name="selected" />
 
-                {{-- One Flux combobox: pick a section already on the estimate, or type a new one's name and create it in line (2026-11-14). --}}
+                {{--
+                    One Flux select (listbox, searchable, with an in-line create): pick a section already on the
+                    estimate, or type a new one's name in its search and create it. The search is its own
+                    property: bound to the name, the select wrote its value "new" into it, and Enter made a
+                    section called "new" (2026-11-14).
+                --}}
                 <div class="space-y-1" data-combine-into>
-                    <flux:select wire:model.live="into" variant="combobox" label="Put the combined items in">
-                        <x-slot name="input">
-                            <flux:select.input wire:model="sectionName" placeholder="Pick a section, or type a new one…" maxlength="60" />
+                    <flux:select wire:model.live="into" variant="listbox" searchable label="Put the combined items in" placeholder="Pick a section, or type a new one…">
+                        <x-slot name="search">
+                            <flux:select.search wire:model="search" placeholder="Find a section, or type a new one's name…" />
                         </x-slot>
 
-                        @if ($into === 'new' && trim($sectionName) !== '')
-                            {{-- selected-label: the box takes the name alone, never the description (which would become the section's name). --}}
-                            <flux:select.option value="new" icon="plus" description="New section at the end of the estimate" :selected-label="trim($sectionName)" wire:key="combine-into-new">{{ trim($sectionName) }}</flux:select.option>
+                        @if ($sectionName !== '')
+                            <flux:select.option :value="\App\Livewire\Estimates\EstimateCombineLineItems::newValue($sectionName)" icon="plus" description="New section at the end of the estimate" :selected-label="$sectionName" wire:key="combine-into-new-{{ md5($sectionName) }}">{{ $sectionName }}</flux:select.option>
                         @endif
                         @foreach ($this->sections as $section)
                             <flux:select.option value="{{ $section['id'] }}" description="Section {{ $section['position'] }} on this estimate" :selected-label="$section['name']" wire:key="combine-into-{{ $section['id'] }}">{{ $section['name'] }}</flux:select.option>
                         @endforeach
 
                         <flux:select.option.create wire:click="newSection" min-length="1">
-                            New section "<span wire:text="sectionName"></span>"
+                            New section "<span wire:text="search"></span>"
                         </flux:select.option.create>
                     </flux:select>
                     <flux:error name="sectionName" />
                     <flux:text size="sm">
-                        {{ $into === 'new' ? 'A new section at the end of the estimate, or one already carrying this name.' : 'At the end of that section; a section the lines come from can take them too.' }}
+                        {{ str_starts_with($into, 'new:') ? 'A new section at the end of the estimate, or one already carrying this name.' : ($into === '' ? 'Pick one of the estimate\'s sections, or type a new name and choose New section.' : 'At the end of that section; a section the lines come from can take them too.') }}
                     </flux:text>
                 </div>
             @endif
