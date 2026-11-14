@@ -14,6 +14,7 @@ use App\Models\SmsThreadRead;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
+use App\Services\Sms\SmsAttachmentStore;
 use App\Services\Sms\ThreadReadMarker;
 use App\Services\SmsTranslationService;
 use App\Services\SmsTaskExtractionService;
@@ -35,7 +36,8 @@ class SmsConversation extends Component
 {
     use WithFileUploads;
 
-    private const ATTACHMENT_VALIDATION_RULE = 'nullable|file|mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm,m4v,3gp,avi';
+    /** HEIC/HEIF (iPhone photos) are let in and stored as JPEG by SmsAttachmentStore (TestFlight, 2026-11-14). */
+    private const ATTACHMENT_VALIDATION_RULE = 'nullable|file|mimes:jpg,jpeg,png,gif,webp,heic,heif,mp4,mov,webm,m4v,3gp,avi';
 
     /** How many photos or videos one text carries — the cap the app's API applies too (SendThreadMessageRequest). */
     public const MAX_ATTACHMENTS = 10;
@@ -370,7 +372,7 @@ class SmsConversation extends Component
         try {
             $this->validate(
                 ['newAttachments.*' => self::attachmentValidationRule()],
-                ['newAttachments.*.mimes' => 'Only photos and videos can be attached (jpg, png, gif, webp, mp4, mov, webm, m4v, 3gp, avi).'],
+                ['newAttachments.*.mimes' => 'Only photos and videos can be attached (jpg, png, gif, webp, heic, mp4, mov, webm, m4v, 3gp, avi).'],
             );
         } finally {
             $this->newAttachments = [];
@@ -430,7 +432,8 @@ class SmsConversation extends Component
         $mediaUrls = [];
 
         foreach ($this->attachments as $attachment) {
-            $mediaUrls[] = '/storage/' . $attachment->store('sms-attachments', 'public');
+            // An iPhone HEIC photo is stored as a JPEG (SmsAttachmentStore).
+            $mediaUrls[] = app(SmsAttachmentStore::class)->store($attachment, 'attachments');
         }
 
         return $mediaUrls;

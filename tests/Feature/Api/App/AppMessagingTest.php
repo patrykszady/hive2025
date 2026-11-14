@@ -263,6 +263,65 @@ it('uploads a video attachment, like the composer\'s image+video media picker', 
     Storage::disk('public')->assertExists(str_replace('/storage/', '', $message->media_urls[0]));
 });
 
+/*
+ * TestFlight, 2026-11-14: "Unable to add an image from iPhone (shouldn't we
+ * convert to jpg like we do on the web?)" — the app sent the photo as HEIC,
+ * the attachment rule refused it, and no phone network carries HEIC anyway.
+ */
+it('takes an iPhone HEIC photo and keeps it as a JPEG', function () {
+    if (\App\Services\ProjectImageImporter::convertHeicToJpeg(base_path('tests/fixtures/frame.heic')) === null) {
+        $this->markTestSkipped('No HEIC converter on this machine.');
+    }
+
+    Storage::fake('public');
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+    $thread = appMessagingThread($vendor, ['participants' => ['+12245550010']]);
+    Http::fake(['https://api.telnyx.com/*' => Http::response(['data' => ['id' => 'telnyx-mms']], 200)]);
+
+    $photo = UploadedFile::fake()->createWithContent('IMG_4021.HEIC', file_get_contents(base_path('tests/fixtures/frame.heic')));
+
+    $response = $this->postJson("/api/app/v1/threads/{$thread->id}/messages", ['body' => 'The wall', 'media' => [$photo]])->assertStatus(201);
+
+    $stored = str_replace('/storage/', '', SmsMessage::findOrFail($response->json('data.id'))->media_urls[0]);
+    expect($stored)->toStartWith('sms-attachments/')->toEndWith('.jpg')
+        ->and(getimagesizefromstring(Storage::disk('public')->get($stored))[2])->toBe(IMAGETYPE_JPEG);
+});
+
+it('keeps a photo iOS already made a JPEG as it is, whatever it is called', function () {
+    Storage::fake('public');
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+    $thread = appMessagingThread($vendor, ['participants' => ['+12245550010']]);
+    Http::fake(['https://api.telnyx.com/*' => Http::response(['data' => ['id' => 'telnyx-mms']], 200)]);
+
+    $jpeg = UploadedFile::fake()->image('source.jpg', 40, 30)->get();
+    $photo = UploadedFile::fake()->createWithContent('IMG_4022.HEIC', $jpeg);
+
+    $response = $this->postJson("/api/app/v1/threads/{$thread->id}/messages", ['body' => 'The floor', 'media' => [$photo]])->assertStatus(201);
+
+    $stored = str_replace('/storage/', '', SmsMessage::findOrFail($response->json('data.id'))->media_urls[0]);
+    expect($stored)->toEndWith('.jpg')
+        ->and(Storage::disk('public')->get($stored))->toBe($jpeg);
+});
+
+it('says so when an iPhone photo cannot be made a JPEG, and sends nothing', function () {
+    Storage::fake('public');
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+    $thread = appMessagingThread($vendor, ['participants' => ['+12245550010']]);
+    Http::fake(['https://api.telnyx.com/*' => Http::response(['data' => ['id' => 'telnyx-mms']], 200)]);
+
+    $broken = UploadedFile::fake()->createWithContent('IMG_4023.HEIC', "\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic");
+
+    $this->postJson("/api/app/v1/threads/{$thread->id}/messages", ['body' => 'The ceiling', 'media' => [$broken]])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['media.0']);
+
+    expect(SmsMessage::query()->where('thread_id', $thread->id)->where('direction', 'outbound')->count())->toBe(0);
+    Http::assertNothingSent();
+});
+
 it('refuses to send project messages while opt-in is pending', function () {
     ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
     Sanctum::actingAs($user, ['app']);

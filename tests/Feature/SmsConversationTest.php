@@ -58,6 +58,9 @@ it('allows common video formats in the sms attachment validation rule', function
     expect($rule)->toContain('m4v');
     expect($rule)->toContain('3gp');
     expect($rule)->toContain('avi');
+    // iPhone photos: let in, and stored as JPEG (SmsAttachmentStore).
+    expect($rule)->toContain('heic');
+    expect($rule)->toContain('heif');
 });
 
 it('decodes html entities in forward thread labels', function (): void {

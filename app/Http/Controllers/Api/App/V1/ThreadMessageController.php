@@ -11,6 +11,7 @@ use App\Livewire\Sms\SmsNewThread;
 use App\Models\SmsMessage;
 use App\Services\GroupSmsService;
 use App\Services\Sms\ScheduledMessageActions;
+use App\Services\Sms\SmsAttachmentStore;
 use App\Services\Sms\ThreadReadMarker;
 use App\Services\SmsTranslationService;
 use Illuminate\Http\JsonResponse;
@@ -85,12 +86,11 @@ class ThreadMessageController extends Controller
         };
 
         $mediaUrls = [];
-        foreach ($request->file('media', []) as $file) {
-            // Same storage convention as the web composer's attachment
-            // upload: a relative /storage/... path; SendGroupMms turns it
-            // into whatever Telnyx needs (public URL or compressed copy).
-            $path = $file->store('sms-attachments', 'public');
-            $mediaUrls[] = '/storage/' . $path;
+        foreach ($request->file('media', []) as $index => $file) {
+            // Same storage as the web composer's attachments: a relative
+            // /storage/... path, an iPhone HEIC photo already a JPEG;
+            // SendGroupMms turns it into whatever Telnyx needs.
+            $mediaUrls[] = app(SmsAttachmentStore::class)->store($file, 'media.'.$index);
         }
 
         // "Schedule send": the same presets and clock as the web composer.
